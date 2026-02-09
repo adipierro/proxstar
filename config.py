@@ -5,8 +5,6 @@ VM_EXPIRE_MONTHS = int(environ.get('PROXSTAR_VM_EXPIRE_MONTHS', '3'))
 VNC_CLEANUP_TOKEN = environ.get('PROXSTAR_VNC_CLEANUP_TOKEN', '')
 
 # Development options
-# Determines weather or not to run STARRS queries (for doing stuff like checking for available IPs)
-USE_STARRS = environ.get('PROXSTAR_USE_STARRS', 'True').lower() in ('true', '1', 't')
 # If you're an RTP and want to see a normal user's homepage view, set this to True.
 FORCE_STANDARD_USER = environ.get('PROXSTAR_FORCE_STANDARD_USER', 'False').lower() in (
     'true',
@@ -33,13 +31,44 @@ PROXMOX_TOKEN_NAME = environ.get('PROXSTAR_PROXMOX_TOKEN_NAME', '')
 PROXMOX_TOKEN_VALUE = environ.get('PROXSTAR_PROXMOX_TOKEN_VALUE', '')
 PROXMOX_ISO_STORAGE = environ.get('PROXSTAR_PROXMOX_ISO_STORAGE', 'nfs-iso')
 PROXMOX_VM_STORAGE = environ.get('PROXSTAR_PROXMOX_VM_STORAGE', 'ceph')
-# STARRS
-STARRS_DB_HOST = environ.get('PROXSTAR_STARRS_DB_HOST', '')
-STARRS_DB_NAME = environ.get('PROXSTAR_DB_NAME', 'starrs')
-STARRS_DB_USER = environ.get('PROXSTAR_DB_USER', '')
-STARRS_DB_PASS = environ.get('PROXSTAR_DB_PASS', '')
-STARRS_USER = environ.get('PROXSTAR_STARRS_USER', 'proxstar')
-STARRS_IP_RANGE = environ.get('PROXSTAR_IP_RANGE', '')
+
+# Proxmox SDN
+SDN_ZONE = environ.get('PROXSTAR_SDN_ZONE', '')
+SDN_ZONE_TYPE = environ.get('PROXSTAR_SDN_ZONE_TYPE', 'simple')
+SDN_ZONE_BRIDGE = environ.get('PROXSTAR_SDN_ZONE_BRIDGE', 'vmbr0')
+SDN_ZONE_IPAM = environ.get('PROXSTAR_SDN_ZONE_IPAM', '')
+SDN_ZONE_MTU = environ.get('PROXSTAR_SDN_ZONE_MTU', '')
+SDN_ZONE_DNS = environ.get('PROXSTAR_SDN_ZONE_DNS', '')
+SDN_VNET_PREFIX = environ.get('PROXSTAR_SDN_VNET_PREFIX', 'student')
+SDN_VNET_ALIAS_PREFIX = environ.get('PROXSTAR_SDN_VNET_ALIAS_PREFIX', 'Proxstar')
+SDN_VNET_VLAN = environ.get('PROXSTAR_SDN_VNET_VLAN', '')
+SDN_BASE_CIDR = environ.get('PROXSTAR_SDN_BASE_CIDR', '10.100.0.0/16')
+SDN_STUDENT_PREFIX = int(environ.get('PROXSTAR_SDN_STUDENT_PREFIX', '24'))
+SDN_DHCP_START_OFFSET = int(environ.get('PROXSTAR_SDN_DHCP_START_OFFSET', '50'))
+SDN_DHCP_END_OFFSET = int(environ.get('PROXSTAR_SDN_DHCP_END_OFFSET', '200'))
+SDN_SUBNET_SNAT = environ.get('PROXSTAR_SDN_SUBNET_SNAT', '').lower() in ('true', '1', 't')
+SDN_SUBNET_DNS = environ.get('PROXSTAR_SDN_SUBNET_DNS', '')
+
+# Session timeouts
+SESSION_TIMEOUT_HOURS = float(environ.get('PROXSTAR_SESSION_TIMEOUT_HOURS', '6'))
+SESSION_SHUTDOWN_GRACE_MINUTES = int(
+    environ.get('PROXSTAR_SESSION_SHUTDOWN_GRACE_MINUTES', '5')
+)
+SESSION_CHECK_INTERVAL_SECONDS = int(
+    environ.get('PROXSTAR_SESSION_CHECK_INTERVAL_SECONDS', '300')
+)
+ENABLE_VM_EXPIRATION = environ.get('PROXSTAR_ENABLE_VM_EXPIRATION', 'False').lower() in (
+    'true',
+    '1',
+    't',
+)
+
+# Template cloning
+TEMPLATE_CLONE_FULL = environ.get('PROXSTAR_TEMPLATE_CLONE_FULL', 'True').lower() in (
+    'true',
+    '1',
+    't',
+)
 
 # LDAP
 LDAP_BIND_DN = environ.get('PROXSTAR_LDAP_BIND_DN', '')

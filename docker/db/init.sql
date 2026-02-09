@@ -1,0 +1,45 @@
+CREATE TABLE IF NOT EXISTS vm_expiration (
+    id INTEGER PRIMARY KEY,
+    expire_date DATE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_limit (
+    id VARCHAR(32) PRIMARY KEY,
+    cpu INTEGER NOT NULL,
+    mem INTEGER NOT NULL,
+    disk INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pool_cache (
+    pool VARCHAR(32) PRIMARY KEY,
+    vms TEXT[][] NOT NULL,
+    num_vms INTEGER NOT NULL,
+    usage JSON NOT NULL,
+    limits JSON NOT NULL,
+    percents JSON NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS template (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR(32) NOT NULL,
+    disk INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ignored_pools (
+    id VARCHAR(32) PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS allowed_users (
+    id VARCHAR(32) PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS shared_pools (
+    name VARCHAR(32) PRIMARY KEY,
+    members VARCHAR(32)[]
+);
+
+CREATE TABLE IF NOT EXISTS student_network (
+    user VARCHAR(32) PRIMARY KEY,
+    vnet VARCHAR(64) NOT NULL,
+    subnet VARCHAR(64) NOT NULL
+);

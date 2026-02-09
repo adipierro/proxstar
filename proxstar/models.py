@@ -61,3 +61,11 @@ class Shared_Pools(Base):
     __tablename__ = 'shared_pools'
     name = Column(String(32), primary_key=True)
     members = Column(MutableList.as_mutable(postgresql.ARRAY(String(32))))
+
+
+@default_repr
+class Student_Network(Base):
+    __tablename__ = 'student_network'
+    user = Column(String(32), primary_key=True)
+    vnet = Column(String(64), nullable=False)
+    subnet = Column(String(64), nullable=False)

@@ -20,6 +20,18 @@ It is available to house members at [proxstar.csh.rit.edu](https://proxstar.csh.
 
 Check out `HACKING/` for more info.
 
+## Docker
+
+1. Copy `docker/.env.example` to `.env` and fill in real values.
+2. Run `docker compose up --build`.
+
+This starts:
+- `web` on port `8080`
+- `worker` (RQ worker)
+- `scheduler` (RQ scheduler)
+- `db` (Postgres)
+- `redis`
+
 ## Questions/Concerns
 
 Please file an [Issue](https://github.com/ComputerScienceHouse/proxstar/issues/new) on this repository.

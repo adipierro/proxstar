@@ -71,3 +71,20 @@ def get_pools(proxmox, db):
             pools.append(poolid)
     pools = sorted(pools)
     return pools
+
+
+def is_hostname_valid(name):
+    if not name or len(name) < 2:
+        return False
+    if not name.replace('-', '').isalnum() or name.startswith('-') or name.endswith('-'):
+        return False
+    return True
+
+
+def is_hostname_available(proxmox, name):
+    if not is_hostname_valid(name):
+        return False
+    for vm in proxmox.cluster.resources.get(type='vm'):
+        if vm.get('name') == name:
+            return False
+    return True

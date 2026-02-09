@@ -82,8 +82,6 @@
                     <dl class="dl-horizontal">
                         <dt>Name</dt>
                         <dd>{{ vm.name }}</dd>
-                        <dt>DNS Name</dt>
-                        <dd>{{ vm.name }}.csh.rit.edu</dd>
                         <dt>ID</dt>
                         <dd>{{ vm.id }}</dd>
                         <dt>Status</dt>
@@ -119,13 +117,6 @@
                                 <i class="fas fa-cog"></i>
                             </button>
                             {% endif %}
-                        </dd>
-                        <dt>Expiration</dt>
-                        <dd>
-                            {{ vm.expire.strftime('%m/%d/%Y') }}
-                            <button class="btn btn-success proxstar-vmbtn" id="renew-vm" name="renew" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">
-                                <i class="fas fa-plus"></i>
-                            </button>
                         </dd>
                     </dl>
                 </div>

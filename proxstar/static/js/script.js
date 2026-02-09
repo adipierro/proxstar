@@ -2,7 +2,44 @@
 
 $(document).ready(function(){
     $('[data-toggle="tooltip"]').tooltip();
+    initSessionTimer();
 });
+
+function initSessionTimer() {
+    const container = $("#session-timer");
+    if (!container.length) {
+        return;
+    }
+    fetch('/session', {
+        credentials: 'same-origin',
+    }).then((response) => {
+        return response.json();
+    }).then((data) => {
+        if (!data.running || data.remaining_seconds === null) {
+            container.hide();
+            return;
+        }
+        container.show();
+        const meta = $("#session-timer-meta");
+        meta.text(`(running VMs: ${data.running_vms})`);
+        const remainingEl = $("#session-timer-remaining");
+        const end = Date.now() + (data.remaining_seconds * 1000);
+        const tick = () => {
+            const remaining = Math.max(0, Math.floor((end - Date.now()) / 1000));
+            const hours = Math.floor(remaining / 3600);
+            const minutes = Math.floor((remaining % 3600) / 60);
+            const seconds = remaining % 60;
+            remainingEl.text(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
+            if (remaining <= 0) {
+                meta.text('(session expired)');
+            }
+        };
+        tick();
+        setInterval(tick, 1000);
+    }).catch(() => {
+        container.hide();
+    });
+}
 
 function confirmDialog(url, confirm, confirmButton, complete, error, location, danger) {
     swal({
@@ -183,28 +220,6 @@ $(".change-iso").click(function(){
     }).catch(err => {
         if (err) {
             swal("Uh oh...", `Unable to retrieve available ISOs. Please try again later.`, "error");
-        } else {
-            swal.stopLoading();
-            swal.close();
-        }
-    });
-});
-
-$("#renew-vm").click(function(){
-    const vmname = $(this).data('vmname');
-    const vmid = $(this).data('vmid');
-    fetch(`/vm/${vmid}/renew`, {
-        credentials: 'same-origin',
-        method: 'post'
-    }).then((response) => {
-        return swal(`${vmname} has been renewed!`, {
-            icon: "success",
-        });
-    }).then(() => {
-        window.location = `/vm/${vmid}`;
-    }).catch(err => {
-        if (err) {
-            swal("Uh oh...", `Unable to renew ${vmname}. Please try again later.`, "error");
         } else {
             swal.stopLoading();
             swal.close();

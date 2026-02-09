@@ -2,6 +2,17 @@
 {% block body %}
 
 <div class="container">
+    <div class="row" id="session-timer" style="display: none;">
+        <div class="col-md-12 col-sm-12">
+            <div class="card bg-light mb-3">
+                <div class="card-body text-center">
+                    <strong>Session time remaining:</strong>
+                    <span id="session-timer-remaining">--:--:--</span>
+                    <span id="session-timer-meta"></span>
+                </div>
+            </div>
+        </div>
+    </div>
     <div class="row">
         {% if external_view %}
         <div class="col-md-12 col-sm-12">

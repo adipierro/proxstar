@@ -15,6 +15,7 @@ from proxstar.models import (
     Usage_Limit,
     VM_Expiration,
     Shared_Pools,
+    Student_Network,
 )
 
 
@@ -233,3 +234,18 @@ def get_shared_pools(db, user, all_pools):
     for pool in db.query(Shared_Pools).filter(Shared_Pools.members.contains(f'{{{user}}}')).all():
         pools.append(pool)
     return pools
+
+
+def get_student_network(db, user):
+    return db.query(Student_Network).get(user)
+
+
+def add_student_network(db, user, vnet, subnet):
+    entry = Student_Network(user=user, vnet=vnet, subnet=subnet)
+    db.add(entry)
+    db.commit()
+    return entry
+
+
+def get_assigned_student_subnets(db):
+    return [entry.subnet for entry in db.query(Student_Network).all()]

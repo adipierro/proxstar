@@ -5,7 +5,6 @@ import atexit
 import logging
 import subprocess
 import psutil
-import psycopg2
 
 # from gunicorn_conf import start_websockify
 import rq_dashboard
@@ -34,7 +33,6 @@ from proxstar.db import (
     Base,
     datetime,
     get_pool_cache,
-    renew_vm_expire,
     set_user_usage_limits,
     get_template,
     get_templates,
@@ -59,8 +57,20 @@ from proxstar.vnc import (
 )
 from proxstar.auth import get_auth
 from proxstar.util import gen_password
-from proxstar.starrs import check_hostname, renew_ip
-from proxstar.proxmox import connect_proxmox, get_isos, get_pools, get_ignored_pools
+from proxstar.proxmox import (
+    connect_proxmox,
+    get_isos,
+    get_pools,
+    get_ignored_pools,
+    is_hostname_available,
+    is_hostname_valid,
+)
+from proxstar.session import (
+    clear_session,
+    get_session_start,
+    set_session_start,
+)
+from proxstar.sdn import ensure_student_network
 
 logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
 
@@ -93,18 +103,6 @@ Base.metadata.bind = engine
 DBSession = sessionmaker(bind=engine)
 db = DBSession()
 
-if app.config['USE_STARRS']:
-    starrs = psycopg2.connect(
-        "dbname='{}' user='{}' host='{}' password='{}'".format(
-            app.config['STARRS_DB_NAME'],
-            app.config['STARRS_DB_USER'],
-            app.config['STARRS_DB_HOST'],
-            app.config['STARRS_DB_PASS'],
-        )
-    )
-else:
-    starrs = None
-
 from proxstar.vm import VM
 from proxstar.user import User
 from proxstar.tasks import (
@@ -114,6 +112,7 @@ from proxstar.tasks import (
     delete_vm_task,
     create_vm_task,
     setup_template_task,
+    enforce_session_timeouts_task,
 )
 
 if 'generate_pool_cache' not in scheduler:
@@ -125,7 +124,7 @@ if 'generate_pool_cache' not in scheduler:
         interval=90,
     )
 
-if 'process_expiring_vms' not in scheduler:
+if app.config.get('ENABLE_VM_EXPIRATION') and 'process_expiring_vms' not in scheduler:
     logging.info('adding process expiring VMs task to scheduler')
     scheduler.cron('0 5 * * *', id='process_expiring_vms', func=process_expiring_vms_task)
 
@@ -136,6 +135,15 @@ if 'cleanup_vnc' not in scheduler:
         scheduled_time=datetime.datetime.utcnow(),
         func=cleanup_vnc_task,
         interval=3600,
+    )
+
+if 'enforce_session_timeouts' not in scheduler:
+    logging.info('adding session timeout enforcement task to scheduler')
+    scheduler.schedule(
+        id='enforce_session_timeouts',
+        scheduled_time=datetime.datetime.utcnow(),
+        func=enforce_session_timeouts_task,
+        interval=app.config['SESSION_CHECK_INTERVAL_SECONDS'],
     )
 
 
@@ -152,6 +160,27 @@ rq_dashboard_blueprint = rq_dashboard.blueprint
 add_rq_dashboard_auth(rq_dashboard_blueprint)
 rq_dashboard.web.setup_rq_connection(app)
 app.register_blueprint(rq_dashboard_blueprint, url_prefix='/rq')
+
+
+def _get_running_vms(user):
+    running = []
+    for vm in user.vms:
+        if 'vmid' not in vm:
+            continue
+        vm_obj = VM(vm['vmid'])
+        if vm_obj.status in ('running', 'paused'):
+            running.append(vm_obj)
+    return running
+
+
+def _ensure_session_started(user):
+    if get_session_start(redis_conn, user.name) is None:
+        set_session_start(redis_conn, user.name)
+
+
+def _clear_session_if_idle(user):
+    if not _get_running_vms(user):
+        clear_session(redis_conn, user.name)
 
 
 @app.errorhandler(404)
@@ -258,13 +287,12 @@ def isos():
 @app.route('/hostname/<string:name>')
 @auth.oidc_auth('default')
 def hostname(name):
-    valid, available = check_hostname(starrs, name) if app.config['USE_STARRS'] else (True, True)
-    if not valid:
+    proxmox = connect_proxmox()
+    if not is_hostname_valid(name):
         return 'invalid'
-    if not available:
+    if not is_hostname_available(proxmox, name):
         return 'taken'
-    else:
-        return 'ok'
+    return 'ok'
 
 
 @app.route('/vm/<string:vmid>')
@@ -309,16 +337,19 @@ def vm_power(vmid, action):
             if usage_check:
                 return usage_check
             vm.start()
+            _ensure_session_started(user)
         elif action == 'stop':
             vm.stop()
             if vnc_token is not None:
                 delete_vnc_target(token=vnc_token)
                 redis_conn.delete(vnc_token_key)
+            _clear_session_if_idle(user)
         elif action == 'shutdown':
             vm.shutdown()
             if vnc_token is not None:
                 delete_vnc_target(token=vnc_token)
                 redis_conn.delete(vnc_token_key)
+            _clear_session_if_idle(user)
         elif action == 'reset':
             vm.reset()
         elif action == 'suspend':
@@ -326,8 +357,10 @@ def vm_power(vmid, action):
             if vnc_token is not None:
                 delete_vnc_target(token=vnc_token)
                 redis_conn.delete(vnc_token_key)
+            _clear_session_if_idle(user)
         elif action == 'resume':
             vm.resume()
+            _ensure_session_started(user)
         return '', 200
     else:
         return '', 403
@@ -394,22 +427,6 @@ def vm_mem(vmid, mem):
             if usage_check:
                 return usage_check
         vm.set_mem(mem * 1024)
-        return '', 200
-    else:
-        return '', 403
-
-
-@app.route('/vm/<string:vmid>/renew', methods=['POST'])
-@auth.oidc_auth('default')
-def vm_renew(vmid):
-    user = User(session['userinfo']['preferred_username'])
-    connect_proxmox()
-    if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
-        renew_vm_expire(db, vmid, app.config['VM_EXPIRE_MONTHS'])
-        for interface in vm.interfaces:
-            if interface[2] != 'No IP' and app.config['USE_STARRS']:
-                renew_ip(starrs, interface[2])
         return '', 200
     else:
         return '', 403
@@ -520,7 +537,8 @@ def create_net_interface(vmid):
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
-        vm.create_net('virtio')
+        vnet, _ = ensure_student_network(db, app.config, user.name)
+        vm.create_net('virtio', bridge=vnet)
         return '', 200
     else:
         return '', 403
@@ -613,11 +631,7 @@ def create():
             if usage_check:
                 return usage_check
             else:
-                valid, available = (
-                    check_hostname(starrs, name) if app.config['USE_STARRS'] else (True, True)
-                )
-
-                if valid and available:
+                if is_hostname_valid(name) and is_hostname_available(proxmox, name):
                     if template == 'none':
                         q.enqueue(
                             create_vm_task,
@@ -826,6 +840,34 @@ def health():
     Shows an ok status if the application is up and running
     """
     return jsonify({'status': 'ok'})
+
+
+@app.route('/session')
+@auth.oidc_auth('default')
+def session_info():
+    user = User(session['userinfo']['preferred_username'])
+    running_vms = _get_running_vms(user)
+    session_start = get_session_start(redis_conn, user.name)
+    if running_vms and session_start is None:
+        session_start = set_session_start(redis_conn, user.name)
+    if not running_vms and session_start is not None:
+        clear_session(redis_conn, user.name)
+        session_start = None
+
+    timeout_seconds = int(app.config['SESSION_TIMEOUT_HOURS'] * 3600)
+    remaining = None
+    if session_start is not None:
+        remaining = max(0, int(timeout_seconds - (time.time() - session_start)))
+
+    return jsonify(
+        {
+            'running': bool(running_vms),
+            'session_start': session_start,
+            'timeout_seconds': timeout_seconds,
+            'remaining_seconds': remaining,
+            'running_vms': len(running_vms),
+        }
+    )
 
 
 def exit_handler():

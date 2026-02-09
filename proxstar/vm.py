@@ -4,16 +4,15 @@ import urllib
 from flask import current_app as app
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from proxstar import db, starrs
+from proxstar import db
 from proxstar.db import delete_vm_expire, get_vm_expire
 from proxstar.proxmox import connect_proxmox, get_free_vmid, get_node_least_mem, get_vm_node
-from proxstar.starrs import get_ip_for_mac
 from proxstar.util import lazy_property, default_repr
 
 
 def check_in_gb(size):
     if size[-1] == 'M':
-        size = f'{int(size.rstrip('M')) / 1000}G'
+        size = f\"{int(size.rstrip('M')) / 1000}G\"
     return size
 
 
@@ -202,6 +201,7 @@ class VM:
 
     @lazy_property
     def interfaces(self):
+        ip_map = self._get_agent_ip_map()
         interfaces = []
         for key, _ in self.config.items():
             if 'net' in key:
@@ -211,13 +211,35 @@ class VM:
                     mac = mac[0].split('=')[1]
                 else:
                     mac = mac[1].split('=')[1]
-                ip = get_ip_for_mac(starrs, mac)
+                ip = ip_map.get(mac, 'No IP')
                 interfaces.append([key, mac, ip])
         interfaces = sorted(interfaces, key=lambda x: x[0])
         return interfaces
 
+    def _get_agent_ip_map(self):
+        proxmox = connect_proxmox()
+        try:
+            data = proxmox.nodes(self.node).qemu(self.id).agent('network-get-interfaces').get()
+        except Exception:
+            return {}
+        interfaces = data.get('result', data) if isinstance(data, dict) else data
+        ip_map = {}
+        for interface in interfaces or []:
+            mac = interface.get('hardware-address')
+            if not mac:
+                continue
+            for addr in interface.get('ip-addresses', []):
+                if addr.get('ip-address-type') != 'ipv4':
+                    continue
+                ip = addr.get('ip-address')
+                if not ip or ip.startswith('169.254.'):
+                    continue
+                ip_map[mac] = ip
+                break
+        return ip_map
+
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-    def create_net(self, int_type):
+    def create_net(self, int_type, bridge=None):
         valid_int_types = ['virtio', 'e1000', 'rtl8139', 'vmxnet3']
         if int_type not in valid_int_types:
             return False
@@ -227,7 +249,10 @@ class VM:
             if name not in self.config:
                 proxmox = connect_proxmox()
                 try:
-                    proxmox.nodes(self.node).qemu(self.id).config.post(**{name: int_type})
+                    net_value = int_type
+                    if bridge:
+                        net_value = f'{int_type},bridge={bridge}'
+                    proxmox.nodes(self.node).qemu(self.id).config.post(**{name: net_value})
                     return True
                 except Exception as e:
                     print(e)
@@ -241,6 +266,16 @@ class VM:
             proxmox.nodes(self.node).qemu(self.id).config.post(delete=net_id)
             return True
         return False
+
+    @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
+    def set_net_bridge(self, net_id, bridge):
+        if net_id not in self.config:
+            return False
+        proxmox = connect_proxmox()
+        parts = self.config[net_id].split(',')
+        int_type = parts[0]
+        proxmox.nodes(self.node).qemu(self.id).config.put(**{net_id: f'{int_type},bridge={bridge}'})
+        return True
 
     def get_mac(self, interface='net0'):
         mac = self.config[interface].split(',')
@@ -372,7 +407,9 @@ class VM:
 
 # Will create a new VM with the given parameters, does not guarantee
 # the VM is done provisioning when returning
-def create_vm(proxmox, user, name, cores, memory, disk, iso):  # pylint: disable=too-many-arguments
+def create_vm(
+    proxmox, user, name, cores, memory, disk, iso, bridge
+):  # pylint: disable=too-many-arguments
     node = proxmox.nodes(get_node_least_mem(proxmox))
     vmid = get_free_vmid(proxmox)
     # Make sure lingering expirations are deleted
@@ -385,7 +422,7 @@ def create_vm(proxmox, user, name, cores, memory, disk, iso):  # pylint: disable
         storage=app.config['PROXMOX_VM_STORAGE'],
         virtio0='{}:{}'.format(app.config['PROXMOX_VM_STORAGE'], disk),
         ide2='{},media=cdrom'.format(iso),
-        net0='virtio,bridge=vmbr0',
+        net0=f'virtio,bridge={bridge}',
         pool=user,
         description='Managed by Proxstar',
     )
@@ -394,13 +431,18 @@ def create_vm(proxmox, user, name, cores, memory, disk, iso):  # pylint: disable
 
 # Will clone a new VM from a template, does not guarantee the
 # VM is done provisioning when returning
-def clone_vm(proxmox, template_id, name, pool):
+def clone_vm(proxmox, template_id, name, pool, full_clone=True):
     node = proxmox.nodes(get_vm_node(proxmox, template_id))
     vmid = get_free_vmid(proxmox)
     # Make sure lingering expirations are deleted
     delete_vm_expire(db, vmid)
     target = get_node_least_mem(proxmox)
     node.qemu(template_id).clone.post(
-        newid=vmid, name=name, pool=pool, full=1, description='Managed by Proxstar', target=target
+        newid=vmid,
+        name=name,
+        pool=pool,
+        full=1 if full_clone else 0,
+        description='Managed by Proxstar',
+        target=target,
     )
     return vmid
