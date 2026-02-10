@@ -122,6 +122,10 @@ class _LocalAuth(_DummyAuth):
                     session['userinfo'] = {
                         'preferred_username': self.app.config.get('LOCAL_USER', 'localuser')
                     }
+                    claim = self.app.config.get('OIDC_GROUPS_CLAIM', 'groups')
+                    local_groups = self.app.config.get('LOCAL_GROUPS', [])
+                    if local_groups:
+                        session['userinfo'][claim] = local_groups
                 return fn(*f_args, **f_kwargs)
 
             return wrapped

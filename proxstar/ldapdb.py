@@ -1,45 +1,56 @@
-from csh_ldap import CSHLDAP
-from flask import current_app as app
-
-from proxstar import logging
-
-_ldap = None
+from flask import current_app as app, has_request_context, session
 
 
-def connect_ldap():
-    global _ldap
-    try:
-        # This is fine because CSHLDAP functions are decorated with @reconnect_on_fail
-        if _ldap is None:
-            _ldap = CSHLDAP(app.config['LDAP_BIND_DN'], app.config['LDAP_BIND_PW'])
-    except Exception as e:
-        logging.error('unable to connect to LDAP: %s', e)
-        raise
-    return _ldap
+def _get_claim(info, path):
+    if not path:
+        return None
+    cur = info
+    for part in path.split('.'):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+        if cur is None:
+            return None
+    return cur
+
+
+def _get_groups():
+    if not has_request_context():
+        return []
+    info = session.get('userinfo', {})
+    claim = app.config.get('OIDC_GROUPS_CLAIM', 'groups')
+    raw = _get_claim(info, claim)
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        return [raw]
+    return []
+
+
+def _has_any_group(target_groups):
+    if not target_groups:
+        return False
+    groups = set(_get_groups())
+    return any(group in groups for group in target_groups)
 
 
 def is_rtp(user):
-    ldap = connect_ldap()
-    rtp_group = ldap.get_group('rtp')
-    return rtp_group.check_member(ldap.get_member(user, uid=True))
+    return _has_any_group(app.config.get('OIDC_ADMIN_GROUPS', []))
 
 
 def is_active(user):
-    ldap = connect_ldap()
-    active_group = ldap.get_group('active')
-    return active_group.check_member(ldap.get_member(user, uid=True))
+    active_groups = app.config.get('OIDC_ACTIVE_GROUPS', [])
+    student_groups = app.config.get('OIDC_STUDENT_GROUPS', [])
+    if not active_groups and not student_groups:
+        return True
+    return _has_any_group(active_groups) or _has_any_group(student_groups)
 
 
 def is_current_student(user):
-    ldap = connect_ldap()
-    current_student_group = ldap.get_group('current_student')
-    return current_student_group.check_member(ldap.get_member(user, uid=True))
+    return _has_any_group(app.config.get('OIDC_STUDENT_GROUPS', []))
 
 
 def is_user(user):
-    ldap = connect_ldap()
-    try:
-        ldap.get_member(user, uid=True)
-        return True
-    except:
-        return False
+    return bool(user)

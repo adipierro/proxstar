@@ -43,6 +43,19 @@ For local development only, you can bypass OIDC:
 
 - Set `PROXSTAR_DISABLE_AUTH=true`
 - Optionally set `PROXSTAR_LOCAL_USER=yourname`
+- Optionally set `PROXSTAR_LOCAL_GROUPS=admin,active`
+
+## OIDC Groups (No LDAP)
+
+The app now uses OIDC groups for authorization:
+
+- `PROXSTAR_OIDC_GROUPS_CLAIM` (default `groups`)
+- `PROXSTAR_OIDC_ADMIN_GROUPS` (comma-separated)
+- `PROXSTAR_OIDC_ACTIVE_GROUPS` (comma-separated)
+- `PROXSTAR_OIDC_STUDENT_GROUPS` (comma-separated)
+
+If both `PROXSTAR_OIDC_ACTIVE_GROUPS` and `PROXSTAR_OIDC_STUDENT_GROUPS` are empty,
+any authenticated user is treated as active.
 
 ## Questions/Concerns
 

@@ -21,11 +21,16 @@ SECRET_KEY = environ.get('PROXSTAR_SECRET_KEY', '')
 TESTING = environ.get('PROXSTAR_TESTING', 'False').lower() in ('true', '1', 't')
 DISABLE_AUTH = environ.get('PROXSTAR_DISABLE_AUTH', 'False').lower() in ('true', '1', 't')
 LOCAL_USER = environ.get('PROXSTAR_LOCAL_USER', 'localuser')
+LOCAL_GROUPS = [g.strip() for g in environ.get('PROXSTAR_LOCAL_GROUPS', '').split(',') if g.strip()]
 
 # OIDC
 OIDC_ISSUER = environ.get('PROXSTAR_OIDC_ISSUER', 'https://sso.csh.rit.edu/auth/realms/csh')
 OIDC_CLIENT_ID = environ.get('PROXSTAR_CLIENT_ID', 'proxstar')
 OIDC_CLIENT_SECRET = environ.get('PROXSTAR_CLIENT_SECRET', '')
+OIDC_GROUPS_CLAIM = environ.get('PROXSTAR_OIDC_GROUPS_CLAIM', 'groups')
+OIDC_ADMIN_GROUPS = [g.strip() for g in environ.get('PROXSTAR_OIDC_ADMIN_GROUPS', '').split(',') if g.strip()]
+OIDC_ACTIVE_GROUPS = [g.strip() for g in environ.get('PROXSTAR_OIDC_ACTIVE_GROUPS', '').split(',') if g.strip()]
+OIDC_STUDENT_GROUPS = [g.strip() for g in environ.get('PROXSTAR_OIDC_STUDENT_GROUPS', '').split(',') if g.strip()]
 
 # Proxmox
 PROXMOX_HOSTS = [host.strip() for host in environ.get('PROXSTAR_PROXMOX_HOSTS', '').split(',')]
