@@ -18,6 +18,9 @@ IP = environ.get('PROXSTAR_IP', '0.0.0.0')
 PORT = environ.get('PROXSTAR_PORT', '5000')
 SERVER_NAME = environ.get('PROXSTAR_SERVER_NAME', 'proxstar.csh.rit.edu')
 SECRET_KEY = environ.get('PROXSTAR_SECRET_KEY', '')
+TESTING = environ.get('PROXSTAR_TESTING', 'False').lower() in ('true', '1', 't')
+DISABLE_AUTH = environ.get('PROXSTAR_DISABLE_AUTH', 'False').lower() in ('true', '1', 't')
+LOCAL_USER = environ.get('PROXSTAR_LOCAL_USER', 'localuser')
 
 # OIDC
 OIDC_ISSUER = environ.get('PROXSTAR_OIDC_ISSUER', 'https://sso.csh.rit.edu/auth/realms/csh')
@@ -35,7 +38,7 @@ PROXMOX_VM_STORAGE = environ.get('PROXSTAR_PROXMOX_VM_STORAGE', 'ceph')
 # Proxmox SDN
 SDN_ZONE = environ.get('PROXSTAR_SDN_ZONE', '')
 SDN_ZONE_TYPE = environ.get('PROXSTAR_SDN_ZONE_TYPE', 'simple')
-SDN_ZONE_BRIDGE = environ.get('PROXSTAR_SDN_ZONE_BRIDGE', 'vmbr0')
+SDN_ZONE_BRIDGE = environ.get('PROXSTAR_SDN_ZONE_BRIDGE', '')
 SDN_ZONE_IPAM = environ.get('PROXSTAR_SDN_ZONE_IPAM', '')
 SDN_ZONE_MTU = environ.get('PROXSTAR_SDN_ZONE_MTU', '')
 SDN_ZONE_DNS = environ.get('PROXSTAR_SDN_ZONE_DNS', '')

@@ -85,14 +85,66 @@ app.config['GIT_REVISION'] = (
     subprocess.check_output('git rev-parse --short HEAD', shell=True).decode('utf-8').rstrip()
 )
 
-# Sentry setup
-sentry_sdk.init(
-    dsn=app.config['SENTRY_DSN'],
-    integrations=[FlaskIntegration(), RqIntegration(), SqlalchemyIntegration()],
-    environment=app.config['SENTRY_ENV'],
-)
+testing = app.config.get('TESTING', False)
+disable_auth = app.config.get('DISABLE_AUTH', False)
 
-auth = get_auth(app)
+# Sentry setup
+if not testing:
+    sentry_sdk.init(
+        dsn=app.config['SENTRY_DSN'],
+        integrations=[FlaskIntegration(), RqIntegration(), SqlalchemyIntegration()],
+        environment=app.config['SENTRY_ENV'],
+    )
+
+
+class _DummyAuth:
+    def oidc_auth(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def oidc_logout(self, fn):
+        return fn
+
+
+class _LocalAuth(_DummyAuth):
+    def __init__(self, app):
+        self.app = app
+
+    def oidc_auth(self, *args, **kwargs):
+        def decorator(fn):
+            from functools import wraps
+
+            @wraps(fn)
+            def wrapped(*f_args, **f_kwargs):
+                if 'userinfo' not in session:
+                    session['userinfo'] = {
+                        'preferred_username': self.app.config.get('LOCAL_USER', 'localuser')
+                    }
+                return fn(*f_args, **f_kwargs)
+
+            return wrapped
+
+        return decorator
+
+    def oidc_logout(self, fn):
+        from functools import wraps
+
+        @wraps(fn)
+        def wrapped(*f_args, **f_kwargs):
+            session.clear()
+            return fn(*f_args, **f_kwargs)
+
+        return wrapped
+
+
+if testing:
+    auth = _DummyAuth()
+elif disable_auth:
+    auth = _LocalAuth(app)
+else:
+    auth = get_auth(app)
 
 redis_conn = Redis(app.config['REDIS_HOST'], app.config['REDIS_PORT'])
 q = Queue(connection=redis_conn, default_timeout=360)
@@ -115,36 +167,37 @@ from proxstar.tasks import (
     enforce_session_timeouts_task,
 )
 
-if 'generate_pool_cache' not in scheduler:
-    logging.info('adding generate pool cache task to scheduler')
-    scheduler.schedule(
-        id='generate_pool_cache',
-        scheduled_time=datetime.datetime.utcnow(),
-        func=generate_pool_cache_task,
-        interval=90,
-    )
+if not testing:
+    if 'generate_pool_cache' not in scheduler:
+        logging.info('adding generate pool cache task to scheduler')
+        scheduler.schedule(
+            id='generate_pool_cache',
+            scheduled_time=datetime.datetime.utcnow(),
+            func=generate_pool_cache_task,
+            interval=90,
+        )
 
-if app.config.get('ENABLE_VM_EXPIRATION') and 'process_expiring_vms' not in scheduler:
-    logging.info('adding process expiring VMs task to scheduler')
-    scheduler.cron('0 5 * * *', id='process_expiring_vms', func=process_expiring_vms_task)
+    if app.config.get('ENABLE_VM_EXPIRATION') and 'process_expiring_vms' not in scheduler:
+        logging.info('adding process expiring VMs task to scheduler')
+        scheduler.cron('0 5 * * *', id='process_expiring_vms', func=process_expiring_vms_task)
 
-if 'cleanup_vnc' not in scheduler:
-    logging.info('adding cleanup VNC task to scheduler')
-    scheduler.schedule(
-        id='cleanup_vnc',
-        scheduled_time=datetime.datetime.utcnow(),
-        func=cleanup_vnc_task,
-        interval=3600,
-    )
+    if 'cleanup_vnc' not in scheduler:
+        logging.info('adding cleanup VNC task to scheduler')
+        scheduler.schedule(
+            id='cleanup_vnc',
+            scheduled_time=datetime.datetime.utcnow(),
+            func=cleanup_vnc_task,
+            interval=3600,
+        )
 
-if 'enforce_session_timeouts' not in scheduler:
-    logging.info('adding session timeout enforcement task to scheduler')
-    scheduler.schedule(
-        id='enforce_session_timeouts',
-        scheduled_time=datetime.datetime.utcnow(),
-        func=enforce_session_timeouts_task,
-        interval=app.config['SESSION_CHECK_INTERVAL_SECONDS'],
-    )
+    if 'enforce_session_timeouts' not in scheduler:
+        logging.info('adding session timeout enforcement task to scheduler')
+        scheduler.schedule(
+            id='enforce_session_timeouts',
+            scheduled_time=datetime.datetime.utcnow(),
+            func=enforce_session_timeouts_task,
+            interval=app.config['SESSION_CHECK_INTERVAL_SECONDS'],
+        )
 
 
 def add_rq_dashboard_auth(blueprint):
@@ -156,10 +209,11 @@ def add_rq_dashboard_auth(blueprint):
             abort(403)
 
 
-rq_dashboard_blueprint = rq_dashboard.blueprint
-add_rq_dashboard_auth(rq_dashboard_blueprint)
-rq_dashboard.web.setup_rq_connection(app)
-app.register_blueprint(rq_dashboard_blueprint, url_prefix='/rq')
+if not testing:
+    rq_dashboard_blueprint = rq_dashboard.blueprint
+    add_rq_dashboard_auth(rq_dashboard_blueprint)
+    rq_dashboard.web.setup_rq_connection(app)
+    app.register_blueprint(rq_dashboard_blueprint, url_prefix='/rq')
 
 
 def _get_running_vms(user):

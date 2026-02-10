@@ -32,6 +32,18 @@ This starts:
 - `db` (Postgres)
 - `redis`
 
+## Tests
+
+1. Install dev deps: `pip install -r requirements-dev.txt`
+2. Run: `pytest`
+
+## Local Auth (No OIDC)
+
+For local development only, you can bypass OIDC:
+
+- Set `PROXSTAR_DISABLE_AUTH=true`
+- Optionally set `PROXSTAR_LOCAL_USER=yourname`
+
 ## Questions/Concerns
 
 Please file an [Issue](https://github.com/ComputerScienceHouse/proxstar/issues/new) on this repository.

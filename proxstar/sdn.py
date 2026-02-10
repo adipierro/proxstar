@@ -39,9 +39,9 @@ def ensure_zone(config, proxmox=None):
         'type': zone_type,
     }
     bridge = config.get('SDN_ZONE_BRIDGE')
-    if zone_type in ('simple', 'vlan', 'qinq') and not bridge:
-        raise RuntimeError('SDN_ZONE_BRIDGE is required for simple/vlan/qinq zones')
-    if bridge:
+    if zone_type in ('vlan', 'qinq'):
+        if not bridge:
+            raise RuntimeError('SDN_ZONE_BRIDGE is required for vlan/qinq zones')
         payload['bridge'] = bridge
     ipam = config.get('SDN_ZONE_IPAM')
     if ipam:
