@@ -27,6 +27,7 @@ Check out `HACKING/` for more info.
 
 This starts:
 - `web` on port `8080`
+- `websockify` on port `8081` (for noVNC console)
 - `worker` (RQ worker)
 - `scheduler` (RQ scheduler)
 - `db` (Postgres)
@@ -56,6 +57,14 @@ The app now uses OIDC groups for authorization:
 
 If both `PROXSTAR_OIDC_ACTIVE_GROUPS` and `PROXSTAR_OIDC_STUDENT_GROUPS` are empty,
 any authenticated user is treated as active.
+
+## VNC Console (Docker)
+
+The console uses `websockify` + noVNC:
+
+1. Docker builds download noVNC into `proxstar/static/noVNC/` (override via `--build-arg NOVNC_VERSION=...`).
+2. Expose `PROXSTAR_WEBSOCKIFY_PORT` from the `web` container.
+3. Set `PROXSTAR_VNC_HOST`/`PROXSTAR_VNC_PORT` to the public host/port the browser can reach.
 
 ## Questions/Concerns
 
