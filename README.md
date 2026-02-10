@@ -1,6 +1,17 @@
 Proxstar
 ===========
 
+## WIP. fork of a project by CSH of rit.edu.
+
+- Proxmox SDNs instead of STARRS. VMnet firewall security groups applied per-pool (per-user)
+- Session limits for users. VMs are shut down after timer ends.
+- LDAP removed. Roles based on OIDC claims.
+- dockerized
+
+Full disclosure: mostly vibe-coded for a PoC. Will be 
+
+===========
+
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 [![Proxstar](https://github.com/ComputerScienceHouse/proxstar/actions/workflows/python-app.yml/badge.svg)](https://github.com/ComputerScienceHouse/proxstar/actions/workflows/python-app.yml)
 
@@ -68,4 +79,4 @@ The console uses `websockify` + noVNC:
 
 ## Questions/Concerns
 
-Please file an [Issue](https://github.com/ComputerScienceHouse/proxstar/issues/new) on this repository.
+Please file an [Issue](https://github.com/adipierro/proxstar/issues/new) on this repository.
