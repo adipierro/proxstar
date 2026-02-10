@@ -408,9 +408,10 @@ class VM:
 # Will create a new VM with the given parameters, does not guarantee
 # the VM is done provisioning when returning
 def create_vm(
-    proxmox, user, name, cores, memory, disk, iso, bridge
+    proxmox, user, name, cores, memory, disk, iso, bridge, node=None
 ):  # pylint: disable=too-many-arguments
-    node = proxmox.nodes(get_node_least_mem(proxmox))
+    target_node = node or get_node_least_mem(proxmox)
+    node = proxmox.nodes(target_node)
     vmid = get_free_vmid(proxmox)
     # Make sure lingering expirations are deleted
     delete_vm_expire(db, vmid)
@@ -431,12 +432,12 @@ def create_vm(
 
 # Will clone a new VM from a template, does not guarantee the
 # VM is done provisioning when returning
-def clone_vm(proxmox, template_id, name, pool, full_clone=True):
+def clone_vm(proxmox, template_id, name, pool, full_clone=True, target=None):
     node = proxmox.nodes(get_vm_node(proxmox, template_id))
     vmid = get_free_vmid(proxmox)
     # Make sure lingering expirations are deleted
     delete_vm_expire(db, vmid)
-    target = get_node_least_mem(proxmox)
+    target = target or get_node_least_mem(proxmox)
     node.qemu(template_id).clone.post(
         newid=vmid,
         name=name,

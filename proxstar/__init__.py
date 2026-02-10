@@ -56,7 +56,7 @@ from proxstar.vnc import (
     open_vnc_session,
 )
 from proxstar.auth import get_auth
-from proxstar.util import gen_password
+from proxstar.util import gen_password, sanitize_pool_name
 from proxstar.proxmox import (
     connect_proxmox,
     get_isos,
@@ -119,13 +119,13 @@ class _LocalAuth(_DummyAuth):
             @wraps(fn)
             def wrapped(*f_args, **f_kwargs):
                 if 'userinfo' not in flask_session:
-                    flask_flask_session['userinfo'] = {
+                    flask_session['userinfo'] = {
                         'preferred_username': self.app.config.get('LOCAL_USER', 'localuser')
                     }
                     claim = self.app.config.get('OIDC_GROUPS_CLAIM', 'groups')
                     local_groups = self.app.config.get('LOCAL_GROUPS', [])
                     if local_groups:
-                        flask_flask_session['userinfo'][claim] = local_groups
+                        flask_session['userinfo'][claim] = local_groups
                 return fn(*f_args, **f_kwargs)
 
             return wrapped
@@ -137,7 +137,7 @@ class _LocalAuth(_DummyAuth):
 
         @wraps(fn)
         def wrapped(*f_args, **f_kwargs):
-            flask_flask_session.clear()
+            flask_session.clear()
             return fn(*f_args, **f_kwargs)
 
         return wrapped
@@ -169,6 +169,7 @@ from proxstar.tasks import (
     create_vm_task,
     setup_template_task,
     enforce_session_timeouts_task,
+    sync_templates_task,
 )
 
 if not testing:
@@ -192,6 +193,15 @@ if not testing:
             scheduled_time=datetime.datetime.utcnow(),
             func=cleanup_vnc_task,
             interval=3600,
+        )
+
+    if app.config.get('TEMPLATE_POOL') and 'sync_templates' not in scheduler:
+        logging.info('adding template sync task to scheduler')
+        scheduler.schedule(
+            id='sync_templates',
+            scheduled_time=datetime.datetime.utcnow(),
+            func=sync_templates_task,
+            interval=300,
         )
 
     if 'enforce_session_timeouts' not in scheduler:
@@ -226,8 +236,11 @@ def _get_running_vms(user):
         if 'vmid' not in vm:
             continue
         vm_obj = VM(vm['vmid'])
-        if vm_obj.status in ('running', 'paused'):
-            running.append(vm_obj)
+        try:
+            if vm_obj.status in ('running', 'paused'):
+                running.append(vm_obj)
+        except Exception:  # pylint: disable=broad-except
+            continue
     return running
 
 
@@ -239,6 +252,30 @@ def _ensure_session_started(user):
 def _clear_session_if_idle(user):
     if not _get_running_vms(user):
         clear_session(redis_conn, user.name)
+
+
+def _get_vm_or_404(vmid):
+    vm = VM(vmid)
+    try:
+        if vm.node is None:
+            abort(404)
+        _ = vm.info
+    except Exception as e:  # pylint: disable=broad-except
+        logging.warning('Failed to locate VM %s: %s', vmid, e)
+        abort(404)
+    return vm
+
+
+def _enqueue_settings_refresh():
+    try:
+        q.enqueue(generate_pool_cache_task, job_timeout=120)
+    except Exception as e:  # pylint: disable=broad-except
+        logging.warning('Failed to enqueue pool cache refresh: %s', e)
+    if app.config.get('TEMPLATE_POOL'):
+        try:
+            q.enqueue(sync_templates_task, job_timeout=120)
+        except Exception as e:  # pylint: disable=broad-except
+            logging.warning('Failed to enqueue template sync: %s', e)
 
 
 def _get_claim(info, path):
@@ -400,7 +437,7 @@ def vm_details(vmid):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         usage_check = user.check_usage(vm.cpu, vm.mem, 0)
         return render_template(
             'vm_details.html',
@@ -420,7 +457,7 @@ def vm_power(vmid, action):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vnc_token_key = f'vnc_token|{vmid}'
         # For deleting the token from redis later
         vnc_token = None
@@ -482,7 +519,7 @@ def vm_console(vmid):
     proxmox = connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         # import pdb; pdb.set_trace()
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         node_host = _node_fqdn(vm.node)
         proxmox = connect_proxmox(node_host)
         vnc_ticket, vnc_port = open_vnc_session(vmid, vm.node, proxmox)
@@ -505,7 +542,7 @@ def vm_cpu(vmid, cores):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         cur_cores = vm.cpu
         if cores >= cur_cores:
             if vm.qmpstatus in ('running', 'paused'):
@@ -526,7 +563,7 @@ def vm_mem(vmid, mem):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         cur_mem = int(vm.mem) // 1024
         if mem >= cur_mem:
             if vm.qmpstatus in ('running', 'paused'):
@@ -547,7 +584,7 @@ def create_disk(vmid, size):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         usage_check = user.check_usage(0, 0, size)
         if usage_check:
             return usage_check
@@ -563,7 +600,7 @@ def resize_disk(vmid, disk, size):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         usage_check = user.check_usage(0, 0, size)
         if usage_check:
             return usage_check
@@ -579,7 +616,7 @@ def delete_disk(vmid, disk):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.delete_disk(disk)
         return '', 200
     else:
@@ -592,7 +629,7 @@ def iso_create(vmid):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.add_iso_drive()
         return '', 200
     else:
@@ -605,7 +642,7 @@ def iso_delete(vmid, iso_drive):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.delete_iso_drive(iso_drive)
         return '', 200
     else:
@@ -618,7 +655,7 @@ def iso_eject(vmid, iso_drive):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.eject_iso(iso_drive)
         return '', 200
     else:
@@ -632,7 +669,7 @@ def iso_mount(vmid, iso_drive, iso):
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         iso = '{}:iso/{}'.format(app.config['PROXMOX_ISO_STORAGE'], iso)
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.mount_iso(iso_drive, iso)
         return '', 200
     else:
@@ -645,7 +682,7 @@ def create_net_interface(vmid):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vnet, _ = ensure_student_network(db, app.config, user.name)
         vm.create_net('virtio', bridge=vnet)
         return '', 200
@@ -659,7 +696,7 @@ def delete_net_interface(vmid, netid):
     user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.delete_net(netid)
         return '', 200
     else:
@@ -689,7 +726,7 @@ def set_boot_order(vmid):
         boot_order = []
         for key in sorted(request.form):
             boot_order.append(request.form[key])
-        vm = VM(vmid)
+        vm = _get_vm_or_404(vmid)
         vm.set_boot_order(boot_order)
         return '', 200
     else:
@@ -729,14 +766,11 @@ def create():
             if iso != 'none':
                 iso = '{}:iso/{}'.format(app.config['PROXMOX_ISO_STORAGE'], iso)
             if not user.rtp:
-                if template == 'none':
-                    usage_check = user.check_usage(0, 0, disk)
-                else:
-                    usage_check = user.check_usage(cores, memory, disk)
+                usage_check = user.check_usage(cores, memory, disk)
                 username = user.name
             else:
                 usage_check = None
-                username = request.form['user']
+                username = sanitize_pool_name(request.form['user'])
             if usage_check:
                 return usage_check
             else:
@@ -820,10 +854,12 @@ def settings():
 def ignored_pools(pool):
     user = User(flask_session['userinfo']['preferred_username'])
     if user.rtp:
+        pool = sanitize_pool_name(pool)
         if request.method == 'POST':
             add_ignored_pool(db, pool)
         elif request.method == 'DELETE':
             delete_ignored_pool(db, pool)
+        _enqueue_settings_refresh()
         return '', 200
     else:
         return '', 403
@@ -836,7 +872,7 @@ def create_shared_pool():
     if request.method == 'GET':
         return render_template('create_pool.html', user=user)
     elif request.method == 'POST':
-        name = request.form['name']
+        name = sanitize_pool_name(request.form['name'])
         members = request.form['members'].split(',')
         description = request.form['description']
         if user.rtp:
@@ -846,6 +882,7 @@ def create_shared_pool():
             except:
                 return 'Error creating pool', 400
             add_shared_pool(db, name, members)
+            _enqueue_settings_refresh()
             return '', 200
         else:
             return '', 403
@@ -855,12 +892,14 @@ def create_shared_pool():
 @auth.oidc_auth('default')
 def modify_shared_pool(name):
     user = User(flask_session['userinfo']['preferred_username'])
+    name = sanitize_pool_name(name)
     members = request.form['members'].split(',')
     if user.rtp:
         pool = get_shared_pool(db, name)
         if pool:
             pool.members = members
             db.commit()
+            _enqueue_settings_refresh()
             return '', 200
         return 'Pool not found', 400
     else:
@@ -871,6 +910,7 @@ def modify_shared_pool(name):
 @auth.oidc_auth('default')
 def delete_shared_pool(name):
     user = User(flask_session['userinfo']['preferred_username'])
+    name = sanitize_pool_name(name)
     if user.rtp:
         pool = get_shared_pool(db, name)
         if pool:
@@ -878,6 +918,7 @@ def delete_shared_pool(name):
             db.commit()
             proxmox = connect_proxmox()
             proxmox.pools(name).delete()
+            _enqueue_settings_refresh()
             return '', 200
         return 'Pool not found', 400
     else:
@@ -893,6 +934,7 @@ def allowed_users(user):
             add_allowed_user(db, user)
         elif request.method == 'DELETE':
             delete_allowed_user(db, user)
+        _enqueue_settings_refresh()
         return '', 200
     else:
         return '', 403
@@ -932,6 +974,7 @@ def template_edit(template_id):
         name = request.form['name']
         disk = request.form['disk']
         set_template_info(db, template_id, name, disk)
+        _enqueue_settings_refresh()
         return '', 200
     else:
         return '', 403

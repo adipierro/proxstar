@@ -1,4 +1,13 @@
 import random
+import re
+
+
+def sanitize_pool_name(name, max_len=64):
+    cleaned = re.sub(r'[^A-Za-z0-9._-]', '-', (name or '').strip())
+    cleaned = re.sub(r'-{2,}', '-', cleaned).strip('-')
+    if not cleaned:
+        cleaned = 'pool'
+    return cleaned[:max_len]
 
 
 def gen_password(

@@ -1,5 +1,4 @@
 config_local.py
-config.local.py
 .env
 __pycache__/*
 */__pycache__/*
@@ -7,6 +6,8 @@ rrd/*
 *.pyc
 *_key
 Pipfile*
+.DS_Store
+*/.DS_Store
 
 # venv parts
 bin

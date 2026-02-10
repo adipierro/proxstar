@@ -9,32 +9,34 @@ from proxstar.ldapdb import is_active, is_user, is_current_student
 from proxstar import db, q, redis_conn
 from proxstar.db import get_allowed_users, get_user_usage_limits, is_rtp, get_shared_pools
 from proxstar.proxmox import connect_proxmox, get_pools, get_proxmox_userid
-from proxstar.util import lazy_property, default_repr
+from proxstar.util import lazy_property, default_repr, sanitize_pool_name
 from proxstar.vm import VM
 
 
 @default_repr
 class User:
-    def __init__(self, username):
+    def __init__(self, username, db_session=None):
         self.name = username
+        self.pool_id = sanitize_pool_name(username)
+        self.db = db_session or db
         self.active = (
             is_active(self.name)
             or is_current_student(self.name)
-            or self.name in get_allowed_users(db)
+            or self.name in get_allowed_users(self.db)
         )
         self.rtp = is_rtp(self.name)
-        self.limits = get_user_usage_limits(db, self.name)
+        self.limits = get_user_usage_limits(self.db, self.name)
 
     @lazy_property
     def vms(self):
         proxmox = connect_proxmox()
         try:
             # try to get the users vms from their pool
-            vms = proxmox.pools(self.name).get()['members']
+            vms = proxmox.pools(self.pool_id).get()['members']
         except ResourceException:
             # they likely don't have a pool yet, try to create it
             if is_user(self.name):
-                proxmox.pools.post(poolid=self.name, comment='Managed by Proxstar')
+                proxmox.pools.post(poolid=self.pool_id, comment='Managed by Proxstar')
                 # if created, their pool is empty so return empty array
                 return []
             else:
@@ -68,7 +70,7 @@ class User:
         allowed_vms = []
         for vm in self.vms:
             allowed_vms.append(vm['vmid'])
-        shared_pools = get_shared_pools(db, self.name, False)
+        shared_pools = get_shared_pools(self.db, self.name, False)
         proxmox = connect_proxmox()
         for pool in shared_pools:
             vms = proxmox.pools(pool.name).get()['members']
@@ -118,7 +120,7 @@ class User:
 
     def delete(self):
         proxmox = connect_proxmox()
-        proxmox.pools(self.name).delete()
+        proxmox.pools(self.pool_id).delete()
         users = proxmox.access.users.get()
         userid = get_proxmox_userid(self.name)
         if any(user['userid'] == userid for user in users):
@@ -137,7 +139,7 @@ class User:
 def get_vms_for_rtp(proxmox, database):
     pools = []
     for pool in get_pools(proxmox, database):
-        user = User(pool)
+        user = User(pool, db_session=database)
         pool_dict = {}
         pool_dict['user'] = user.name
         pool_dict['vms'] = user.vms

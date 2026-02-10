@@ -1,4 +1,7 @@
 import datetime
+import os
+
+from flask import current_app as app, has_app_context
 
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import exists
@@ -17,6 +20,20 @@ from proxstar.models import (
     Shared_Pools,
     Student_Network,
 )
+
+
+def _get_default_limits():
+    if has_app_context():
+        return (
+            app.config.get('DEFAULT_CPU_LIMIT', 8),
+            app.config.get('DEFAULT_MEM_LIMIT', 8),
+            app.config.get('DEFAULT_DISK_LIMIT', 250),
+        )
+    return (
+        int(os.environ.get('PROXSTAR_DEFAULT_CPU_LIMIT', '8')),
+        int(os.environ.get('PROXSTAR_DEFAULT_MEM_LIMIT', '8')),
+        int(os.environ.get('PROXSTAR_DEFAULT_DISK_LIMIT', '250')),
+    )
 
 
 def get_vm_expire(db, vmid, months):
@@ -70,9 +87,10 @@ def get_user_usage_limits(db, user):
         limits['mem'] = db.query(Usage_Limit).filter(Usage_Limit.id == user).one().mem
         limits['disk'] = db.query(Usage_Limit).filter(Usage_Limit.id == user).one().disk
     else:
-        limits['cpu'] = 8
-        limits['mem'] = 8
-        limits['disk'] = 250
+        default_cpu, default_mem, default_disk = _get_default_limits()
+        limits['cpu'] = default_cpu
+        limits['mem'] = default_mem
+        limits['disk'] = default_disk
     return limits
 
 
@@ -216,6 +234,36 @@ def set_template_info(db, template_id, name, disk):
         db.commit()
 
 
+def sync_templates(db, templates):
+    if templates is None:
+        return
+    template_ids = set()
+    for template in templates:
+        template_id = int(template['id'])
+        template_ids.add(template_id)
+        record = db.query(Template).filter(Template.id == template_id).one_or_none()
+        disk = template.get('disk')
+        if record:
+            record.name = template.get('name', record.name)
+            if disk is not None and (record.disk == 0 or record.disk is None):
+                record.disk = disk
+        else:
+            db.add(
+                Template(
+                    id=template_id,
+                    name=template.get('name', str(template_id)),
+                    disk=disk or 0,
+                )
+            )
+    if template_ids:
+        db.query(Template).filter(~Template.id.in_(template_ids)).delete(
+            synchronize_session=False
+        )
+    else:
+        db.query(Template).delete()
+    db.commit()
+
+
 def add_shared_pool(db, name, members):
     if db.query(Shared_Pools).get(name):
         return 'Name Already in Use'
@@ -237,11 +285,11 @@ def get_shared_pools(db, user, all_pools):
 
 
 def get_student_network(db, user):
-    return db.query(Student_Network).get(user)
+    return db.query(Student_Network).filter(Student_Network.username == user).one_or_none()
 
 
 def add_student_network(db, user, vnet, subnet):
-    entry = Student_Network(user=user, vnet=vnet, subnet=subnet)
+    entry = Student_Network(username=user, vnet=vnet, subnet=subnet)
     db.add(entry)
     db.commit()
     return entry

@@ -1,3 +1,5 @@
+import math
+
 from flask import current_app as app
 from proxmoxer import ProxmoxAPI
 
@@ -71,6 +73,34 @@ def get_pools(proxmox, db):
             pools.append(poolid)
     pools = sorted(pools)
     return pools
+
+
+def get_templates_from_pool(proxmox, pool_name):
+    if not pool_name:
+        return None
+    try:
+        pool = proxmox.pools(pool_name).get()
+        members = pool.get('members', [])
+    except Exception as e:  # pylint: disable=broad-except
+        logging.error('Failed to load template pool %s: %s', pool_name, e)
+        return None
+    templates = []
+    for member in members:
+        if member.get('type') != 'qemu':
+            continue
+        is_template = member.get('template')
+        if str(is_template).lower() not in ('1', 'true'):
+            continue
+        vmid = member.get('vmid')
+        if vmid is None:
+            continue
+        name = member.get('name') or str(vmid)
+        maxdisk = member.get('maxdisk')
+        disk_gb = None
+        if maxdisk is not None:
+            disk_gb = int(math.ceil(maxdisk / (1024 ** 3)))
+        templates.append({'id': int(vmid), 'name': name, 'disk': disk_gb})
+    return templates
 
 
 def get_proxmox_userid(username):

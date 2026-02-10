@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS shared_pools (
 );
 
 CREATE TABLE IF NOT EXISTS student_network (
-    user VARCHAR(32) PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(32) NOT NULL UNIQUE,
     vnet VARCHAR(64) NOT NULL,
     subnet VARCHAR(64) NOT NULL
 );

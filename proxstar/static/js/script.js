@@ -273,13 +273,13 @@ $("#create-vm").click(function(){
         return disk
     }).then((disk) => {
         if (name && disk) {
-            if (template != 'none' && !ssh_regex.test(ssh_key)) {
+            if (template != 'none' && ssh_key && !ssh_regex.test(ssh_key)) {
                 swal("Uh oh...", "Invalid SSH key!", "error");
             } else if (disk > max_disk) {
                 swal("Uh oh...", `You do not have enough disk resources available! Please lower the VM disk size to ${max_disk}GB or lower.`, "error");
-            } else if (template != 'none' && cores > max_cpu) {
+            } else if (cores > max_cpu) {
                 swal("Uh oh...", `You do not have enough CPU resources available! Please lower the VM cores to ${max_cpu} or lower.`, "error");
-            } else if (template != 'none' && mem/1024 > max_mem) {
+            } else if (mem/1024 > max_mem) {
                 swal("Uh oh...", `You do not have enough memory resources available! Please lower the VM memory to ${max_mem}GB or lower.`, "error");
             } else {
                 fetch(`/hostname/${name}`, {
