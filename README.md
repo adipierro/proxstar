@@ -8,7 +8,7 @@ Proxstar
 - LDAP removed. Roles based on OIDC claims.
 - dockerized
 
-Full disclosure: mostly vibe-coded for a PoC. Will be 
+Full disclosure: mostly vibe-coded for a PoC. Will be refactored once applicability confirmed.
 
 ===========
 
