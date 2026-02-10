@@ -50,6 +50,7 @@ def test_template_ssh_key_optional(monkeypatch):
     _DummyVM.ssh_keys_called = 0
 
     monkeypatch.setattr(tasks, 'connect_proxmox', lambda: object())
+    monkeypatch.setattr(tasks, 'get_node_least_mem', lambda *_args, **_kwargs: 'node')
     monkeypatch.setattr(tasks, 'ensure_student_network', lambda *_args, **_kwargs: ('vnet', 'subnet'))
     monkeypatch.setattr(tasks, 'clone_vm', lambda *_args, **_kwargs: 100)
     monkeypatch.setattr(tasks, 'get_template', lambda *_args, **_kwargs: {})

@@ -60,6 +60,13 @@ def _get_vnet_subnets(proxmox, vnet_name):
         return []
 
 
+def _get_vnet(proxmox, vnet_name):
+    for vnet in _list_vnets(proxmox):
+        if vnet.get('vnet') == vnet_name:
+            return vnet
+    return None
+
+
 def _find_vnet_by_alias(proxmox, alias):
     for vnet in _list_vnets(proxmox):
         if vnet.get('alias') == alias:
@@ -120,19 +127,6 @@ def _wait_for_task(proxmox, upid, timeout=60, interval=2):
     raise RuntimeError(f'SDN apply task timed out after {timeout}s: {upid}')
 
 
-def wait_for_vnet_bridge(proxmox, node, vnet_name, timeout=60, interval=2):
-    if not node:
-        raise RuntimeError('No target node supplied for SDN bridge check')
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            for iface in proxmox.nodes(node).network.get():
-                if iface.get('iface') == vnet_name or iface.get('name') == vnet_name:
-                    return True
-        except Exception as e:  # pylint: disable=broad-except
-            logging.warning('Failed to check SDN bridge on %s: %s', node, e)
-        time.sleep(interval)
-    raise RuntimeError(f'SDN bridge {vnet_name} not present on node {node}')
 
 
 def _get_existing_subnets(proxmox):
@@ -146,7 +140,76 @@ def _get_existing_subnets(proxmox):
     return existing
 
 
-def ensure_zone(config, proxmox=None):
+class SubnetCollision(RuntimeError):
+    def __init__(self, subnet_cidr):
+        super().__init__(f'SDN subnet {subnet_cidr} already defined elsewhere')
+        self.subnet_cidr = subnet_cidr
+
+
+def _is_pending(obj):
+    if not isinstance(obj, dict):
+        return False
+    pending = obj.get('pending')
+    if isinstance(pending, str):
+        return pending.lower() in ('1', 'true', 'yes')
+    if isinstance(pending, int):
+        return pending == 1
+    if pending is True:
+        return True
+    state = obj.get('state') or obj.get('status')
+    if isinstance(state, str) and state.lower() == 'pending':
+        return True
+    return False
+
+
+def _vnet_ready(config, proxmox, vnet_name, subnet_cidr):
+    vnet = _get_vnet(proxmox, vnet_name)
+    if not vnet:
+        logging.info('SDN: vnet %s not found', vnet_name)
+        return False
+    if _is_pending(vnet):
+        logging.info('SDN: vnet %s is pending', vnet_name)
+        return False
+    zone_name = _get_zone_name(config)
+    if vnet.get('zone') != zone_name:
+        logging.info(
+            'SDN: vnet %s zone mismatch (got %s, expected %s)',
+            vnet_name,
+            vnet.get('zone'),
+            zone_name,
+        )
+        return False
+    if subnet_cidr:
+        has_subnet = False
+        vnet_subnets = _get_vnet_subnets(proxmox, vnet_name)
+        for subnet in vnet_subnets:
+            if subnet.get('subnet') == subnet_cidr:
+                if _is_pending(subnet):
+                    logging.info('SDN: subnet %s on vnet %s is pending', subnet_cidr, vnet_name)
+                    return False
+                has_subnet = True
+                break
+        if not has_subnet:
+            logging.info(
+                'SDN: subnet %s missing on vnet %s (seen=%s)',
+                subnet_cidr,
+                vnet_name,
+                [s.get('subnet') for s in vnet_subnets],
+            )
+            return False
+    group = config.get('SDN_VNET_FIREWALL_GROUP', '')
+    if group:
+        has_group = any(
+            rule.get('type') == 'group' and rule.get('action') == group
+            for rule in _list_firewall_rules(proxmox, vnet_name)
+        )
+        if not has_group:
+            logging.info('SDN: firewall group %s missing on vnet %s', group, vnet_name)
+            return False
+    return True
+
+
+def ensure_zone(config, proxmox=None, apply_now=True):
     if proxmox is None:
         proxmox = connect_proxmox()
     zone_name = _get_zone_name(config)
@@ -175,11 +238,12 @@ def ensure_zone(config, proxmox=None):
         payload['dns'] = dns
 
     proxmox.cluster.sdn.zones.post(**payload)
-    require_sdn_apply(proxmox, config=config)
+    if apply_now:
+        require_sdn_apply(proxmox, config=config)
     return zone_name
 
 
-def ensure_vnet(config, vnet_name, proxmox=None, alias=None):
+def ensure_vnet(config, vnet_name, proxmox=None, alias=None, apply_now=True):
     if proxmox is None:
         proxmox = connect_proxmox()
     zone_name = _get_zone_name(config)
@@ -198,11 +262,12 @@ def ensure_vnet(config, vnet_name, proxmox=None, alias=None):
         payload['tag'] = int(vlan_id)
 
     proxmox.cluster.sdn.vnets.post(**payload)
-    require_sdn_apply(proxmox, config=config)
+    if apply_now:
+        require_sdn_apply(proxmox, config=config)
     return vnet_name
 
 
-def ensure_subnet(config, vnet_name, subnet_cidr, proxmox=None):
+def ensure_subnet(config, vnet_name, subnet_cidr, proxmox=None, apply_now=True):
     if proxmox is None:
         proxmox = connect_proxmox()
 
@@ -243,14 +308,22 @@ def ensure_subnet(config, vnet_name, subnet_cidr, proxmox=None):
         if 'already defined' in str(e):
             for subnet in _get_vnet_subnets(proxmox, vnet_name):
                 if subnet.get('subnet') == subnet_cidr:
-                    require_sdn_apply(proxmox, config=config)
+                    if apply_now:
+                        require_sdn_apply(proxmox, config=config)
                     return subnet_cidr
+            for subnet in _list_subnets(proxmox):
+                if subnet.get('subnet') == subnet_cidr and subnet.get('vnet') == vnet_name:
+                    if apply_now:
+                        require_sdn_apply(proxmox, config=config)
+                    return subnet_cidr
+            raise SubnetCollision(subnet_cidr)
         raise
-    require_sdn_apply(proxmox, config=config)
+    if apply_now:
+        require_sdn_apply(proxmox, config=config)
     return subnet_cidr
 
 
-def ensure_firewall_group_rule(config, vnet_name, proxmox=None):
+def ensure_firewall_group_rule(config, vnet_name, proxmox=None, apply_now=True):
     if proxmox is None:
         proxmox = connect_proxmox()
     group = config.get('SDN_VNET_FIREWALL_GROUP', '')
@@ -264,18 +337,24 @@ def ensure_firewall_group_rule(config, vnet_name, proxmox=None):
         'action': group,
     }
     proxmox.cluster.sdn.vnets(vnet_name).firewall.rules.post(**payload)
-    require_sdn_apply(proxmox, config=config)
+    if apply_now:
+        require_sdn_apply(proxmox, config=config)
     return group
 
 
 def apply_sdn(proxmox, config=None):
     apply_timeout = 60
+    payload = {}
     if config is not None:
         apply_timeout = int(config.get('SDN_APPLY_TIMEOUT', 60))
+        lock_token = config.get('SDN_LOCK_TOKEN', '')
+        if lock_token:
+            payload['lock-token'] = lock_token
+            payload['release-lock'] = 1 if config.get('SDN_RELEASE_LOCK', True) else 0
     for attempt in (
-        lambda: proxmox.cluster.sdn.apply.post(),
-        lambda: proxmox.cluster.sdn.apply.put(),
-        lambda: proxmox.cluster.sdn.post(),
+        # lambda: proxmox.cluster.sdn.apply.post(),
+        # lambda: proxmox.cluster.sdn.apply.put(),
+        lambda: proxmox.cluster.sdn.put(**payload),
     ):
         try:
             result = attempt()
@@ -309,7 +388,7 @@ def ensure_student_network(db, config, user, proxmox=None):
     if proxmox is None:
         proxmox = connect_proxmox()
 
-    zone_name = ensure_zone(config, proxmox)
+    ensure_zone(config, proxmox, apply_now=False)
     max_len = int(config.get('SDN_VNET_MAX_LEN', 8))
     alias_prefix = config.get('SDN_VNET_ALIAS_PREFIX', 'Proxstar')
     vnet_alias = f'{alias_prefix} {user}'
@@ -329,8 +408,10 @@ def ensure_student_network(db, config, user, proxmox=None):
         return vnet_name, subnet_cidr
 
     if not entry:
+        logging.info('SDN: no existing network entry for %s, attempting adopt', user)
         adopt_vnet = _find_vnet_by_alias(proxmox, vnet_alias)
         if adopt_vnet:
+            logging.info('SDN: adopting vnet %s for %s via alias', adopt_vnet, user)
             subnets = _get_vnet_subnets(proxmox, adopt_vnet)
             for subnet in subnets:
                 subnet_cidr = subnet.get('subnet')
@@ -340,29 +421,37 @@ def ensure_student_network(db, config, user, proxmox=None):
     if entry:
         vnet_name = entry.vnet
         subnet = entry.subnet
+        logging.info('SDN: found entry for %s -> vnet %s subnet %s', user, vnet_name, subnet)
+        if _vnet_ready(config, proxmox, vnet_name, subnet):
+            logging.info('SDN: vnet %s already ready for %s', vnet_name, user)
+            return vnet_name, subnet
         try:
-            ensure_vnet(config, vnet_name, proxmox, alias=vnet_alias)
-            ensure_subnet(config, vnet_name, subnet, proxmox)
-            ensure_firewall_group_rule(config, vnet_name, proxmox)
+            ensure_vnet(config, vnet_name, proxmox, alias=vnet_alias, apply_now=False)
+            ensure_subnet(config, vnet_name, subnet, proxmox, apply_now=False)
+            ensure_firewall_group_rule(config, vnet_name, proxmox, apply_now=False)
             require_sdn_apply(proxmox, config=config)
-        except Exception as e:
-            if 'already defined' in str(e):
-                adopt_vnet = _find_vnet_by_alias(proxmox, vnet_alias)
-                if adopt_vnet:
-                    subnets = _get_vnet_subnets(proxmox, adopt_vnet)
-                    for subnet in subnets:
-                        subnet_cidr = subnet.get('subnet')
-                        if subnet_cidr:
-                            return _save_entry(entry, adopt_vnet, subnet_cidr)
-                db.delete(entry)
-                db.commit()
-            else:
-                raise
+        except SubnetCollision as e:
+            logging.warning('SDN: subnet collision for %s (%s)', user, e.subnet_cidr)
+            adopt_vnet = _find_vnet_by_alias(proxmox, vnet_alias)
+            if adopt_vnet:
+                logging.info('SDN: adopting vnet %s after collision for %s', adopt_vnet, user)
+                subnets = _get_vnet_subnets(proxmox, adopt_vnet)
+                for subnet_entry in subnets:
+                    subnet_cidr = subnet_entry.get('subnet')
+                    if subnet_cidr:
+                        return _save_entry(entry, adopt_vnet, subnet_cidr)
+            db.delete(entry)
+            db.commit()
+            entry = None
+            reserved = {e.subnet_cidr}
+        except Exception:
+            raise
         else:
+            logging.info('SDN: vnet %s configured for %s', vnet_name, user)
             return vnet_name, subnet
 
     max_attempts = int(config.get('SDN_SUBNET_ALLOCATE_ATTEMPTS', 5))
-    reserved = set()
+    reserved = locals().get('reserved', set())
     for _ in range(max_attempts):
         subnet = allocate_student_subnet(
             db,
@@ -371,6 +460,7 @@ def ensure_student_network(db, config, user, proxmox=None):
             proxmox=proxmox,
             reserved=reserved,
         )
+        logging.info('SDN: allocated subnet %s for %s', subnet, user)
 
         entry = Student_Network(username=user, vnet='pending', subnet=subnet)
         db.add(entry)
@@ -380,19 +470,22 @@ def ensure_student_network(db, config, user, proxmox=None):
         vnet_name = _build_vnet_id(vnet_prefix, entry.id, max_len)
 
         try:
-            ensure_vnet(config, vnet_name, proxmox, alias=vnet_alias)
-            ensure_subnet(config, vnet_name, subnet, proxmox)
-            ensure_firewall_group_rule(config, vnet_name, proxmox)
+            ensure_vnet(config, vnet_name, proxmox, alias=vnet_alias, apply_now=False)
+            ensure_subnet(config, vnet_name, subnet, proxmox, apply_now=False)
+            ensure_firewall_group_rule(config, vnet_name, proxmox, apply_now=False)
             require_sdn_apply(proxmox, config=config)
-        except Exception as e:
+        except SubnetCollision as e:
             db.rollback()
-            if 'already defined' in str(e):
-                reserved.add(subnet)
-                continue
+            reserved.add(e.subnet_cidr)
+            logging.warning('SDN: subnet collision on %s, retrying', e.subnet_cidr)
+            continue
+        except Exception:
+            db.rollback()
             raise
 
         entry.vnet = vnet_name
         db.commit()
+        logging.info('SDN: created vnet %s subnet %s for %s', vnet_name, subnet, user)
         return entry.vnet, entry.subnet
 
     raise RuntimeError('Unable to allocate a unique SDN subnet')

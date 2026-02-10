@@ -371,7 +371,13 @@ def list_vms(user_view=None):
                     vms.append(pending_vm)
         else:
             vms = 'INACTIVE'
-    return render_template('list_vms.html', user=user, external_view=user_view, vms=vms)
+    return render_template(
+        'list_vms.html',
+        user=user,
+        external_view=user_view,
+        vms=vms,
+        view_user=user_view.name if user_view else None,
+    )
 
 
 @app.route('/pool/shared/<string:name>')
@@ -389,7 +395,26 @@ def list_shared_vms(name=None):
         return 'Pool does not exist', 400
     if app.config['FORCE_STANDARD_USER']:
         user.rtp = False
-    return render_template('list_vms.html', user=user, external_view=pool, vms=vms)
+    return render_template(
+        'list_vms.html',
+        user=user,
+        external_view=pool,
+        vms=vms,
+        view_user=None,
+    )
+
+
+@app.route('/api/pending-vms')
+@auth.oidc_auth('default')
+def pending_vms_api():
+    user = User(flask_session['userinfo']['preferred_username'])
+    view_user = request.args.get('user')
+    target = user
+    if view_user and view_user != user.name:
+        if not user.rtp:
+            abort(403)
+        target = User(view_user)
+    return jsonify({'pending': target.pending_vms})
 
 
 @app.route('/pools')
@@ -534,6 +559,16 @@ def vm_console(vmid):
 
     else:
         return '', 403
+
+
+@app.route('/console/<string:vmid>')
+@auth.oidc_auth('default')
+def console_page(vmid):
+    user = User(flask_session['userinfo']['preferred_username'])
+    connect_proxmox()
+    if user.rtp or int(vmid) in user.allowed_vms:
+        return render_template('vm_console.html', user=user, vmid=vmid)
+    return '', 403
 
 
 @app.route('/vm/<string:vmid>/cpu/<int:cores>', methods=['POST'])

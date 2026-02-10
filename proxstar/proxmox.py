@@ -66,9 +66,12 @@ def get_isos(proxmox, storage):
 
 def get_pools(proxmox, db):
     ignored_pools = get_ignored_pools(db)
+    template_pool = app.config.get('TEMPLATE_POOL', '')
     pools = []
     for pool in proxmox.pools.get():
         poolid = pool['poolid']
+        if template_pool and poolid == template_pool:
+            continue
         if poolid not in ignored_pools and is_user(poolid):
             pools.append(poolid)
     pools = sorted(pools)

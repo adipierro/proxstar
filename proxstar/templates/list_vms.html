@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 
-<div class="container">
+<div class="container" id="vm-list" data-view-user="{{ view_user or '' }}">
     <div class="row" id="session-timer" style="display: none;">
         <div class="col-md-12 col-sm-12">
             <div class="card bg-light mb-3">
@@ -42,7 +42,7 @@
         {% else %}
             {% for vm in vms %}
                 <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
-                    <div class="card bg-light mb-3">
+                    <div class="card bg-light mb-3 vm-card" data-vm-name="{{ vm['name'] }}" data-pending="{{ 'true' if vm.get('pending', False) else 'false' }}">
                         <div class="card-body text-center">
                             {% if not vm.get('pending', False) %}
                             <a href="/vm/{{ vm['vmid'] }}">
@@ -51,7 +51,7 @@
                             {% else %}
                             <p>{{ vm['name'] }}</p>
                             {% endif %}
-                            <p>Status: {{ vm['status'] }}</p>
+                            <p class="vm-status">Status: <span class="vm-status-text">{{ vm['status'] }}</span></p>
                         </div>
                     </div>
                 </div>

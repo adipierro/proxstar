@@ -24,7 +24,7 @@ from proxstar.proxmox import (
     get_templates_from_pool,
     get_node_least_mem,
 )
-from proxstar.sdn import ensure_student_network, wait_for_vnet_bridge
+from proxstar.sdn import ensure_student_network
 from proxstar.session import (
     clear_session,
     get_session_start,
@@ -69,11 +69,10 @@ def create_vm_task(user, name, cores, memory, disk, iso):  # pylint: disable=too
             try:
                 target_node = get_node_least_mem(proxmox)
                 vnet, _ = ensure_student_network(db, app.config, user, proxmox)
-                wait_for_vnet_bridge(proxmox, target_node, vnet)
             except Exception as e:  # pylint: disable=broad-except
                 logging.error('[%s] SDN setup failed: %s', name, e)
                 set_job_status(job, 'failed: sdn')
-                return
+                raise
             pool_id = sanitize_pool_name(user)
             logging.info('[{}] Creating VM.'.format(name))
             set_job_status(job, 'creating VM')
@@ -186,11 +185,10 @@ def setup_template_task(
             try:
                 target_node = get_node_least_mem(proxmox)
                 vnet, _ = ensure_student_network(db, app.config, user, proxmox)
-                wait_for_vnet_bridge(proxmox, target_node, vnet)
             except Exception as e:  # pylint: disable=broad-except
                 logging.error('[%s] SDN setup failed: %s', name, e)
                 set_job_status(job, 'failed: sdn')
-                return
+                raise
             pool_id = sanitize_pool_name(user)
             logging.info('[{}] Retrieving template info for template {}.'.format(name, template_id))
             get_template(db, template_id)

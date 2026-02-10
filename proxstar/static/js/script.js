@@ -3,6 +3,8 @@
 $(document).ready(function(){
     $('[data-toggle="tooltip"]').tooltip();
     initSessionTimer();
+    initPendingVmRefresh();
+    initVmConsole();
 });
 
 function initSessionTimer() {
@@ -39,6 +41,98 @@ function initSessionTimer() {
     }).catch(() => {
         container.hide();
     });
+}
+
+function initPendingVmRefresh() {
+    const container = document.getElementById('vm-list');
+    if (!container) {
+        return;
+    }
+    const getPendingCards = () => document.querySelectorAll('.vm-card[data-pending="true"]');
+    if (!getPendingCards().length) {
+        return;
+    }
+    const viewUser = container.dataset.viewUser;
+    const url = viewUser ? `/api/pending-vms?user=${encodeURIComponent(viewUser)}` : '/api/pending-vms';
+    const pollIntervalMs = 5000;
+    const poll = () => {
+        fetch(url, { credentials: 'same-origin' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('pending-vms-fetch-failed');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                const pending = Array.isArray(data.pending) ? data.pending : [];
+                const statusMap = new Map();
+                pending.forEach((entry) => {
+                    if (entry && entry.name) {
+                        statusMap.set(entry.name, entry.status || 'no status yet');
+                    }
+                });
+                let shouldReload = false;
+                getPendingCards().forEach((card) => {
+                    const name = card.dataset.vmName;
+                    if (!name) {
+                        return;
+                    }
+                    const statusEl = card.querySelector('.vm-status-text');
+                    if (statusMap.has(name)) {
+                        if (statusEl) {
+                            statusEl.textContent = statusMap.get(name);
+                        }
+                    } else {
+                        shouldReload = true;
+                    }
+                });
+                if (shouldReload || (getPendingCards().length && pending.length === 0)) {
+                    window.location.reload();
+                }
+            })
+            .catch(() => {
+                // Ignore transient failures; the next poll will retry.
+            });
+    };
+    poll();
+    setInterval(poll, pollIntervalMs);
+}
+
+function initVmConsole() {
+    const container = document.getElementById('vm-console');
+    if (!container) {
+        return;
+    }
+    const vmid = container.dataset.vmid;
+    if (!vmid) {
+        return;
+    }
+    const statusEl = document.getElementById('console-status');
+    const frame = document.getElementById('console-frame');
+    fetch(`/console/vm/${vmid}`, {
+        credentials: 'same-origin',
+        method: 'post',
+    })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error('console-fetch-failed');
+            }
+            return response.json();
+        })
+        .then((vnc_params) => {
+            const src = `/static/noVNC/vnc.html?autoconnect=true&password=${encodeURIComponent(vnc_params.password)}&host=${encodeURIComponent(vnc_params.host)}&port=${encodeURIComponent(vnc_params.port)}&path=path?token=${encodeURIComponent(vnc_params.token)}`;
+            if (frame) {
+                frame.src = src;
+            }
+            if (statusEl) {
+                statusEl.textContent = 'Connected.';
+            }
+        })
+        .catch(() => {
+            if (statusEl) {
+                statusEl.textContent = 'Unable to start console. Please try again later.';
+            }
+        });
 }
 
 function confirmDialog(url, confirm, confirmButton, complete, error, location, danger) {
@@ -786,23 +880,7 @@ function change_for_template(obj) {
 $("#console-vm").click(function(){
     const vmname = $(this).data('vmname');
     const vmid = $(this).data('vmid');
-    fetch(`/console/vm/${vmid}`, {
-        credentials: 'same-origin',
-        method: 'post'
-    }).then((response) => {
-        return response.json()
-    }).then((vnc_params) => {
-        // TODO (willnilges): encrypt=true
-        // TODO (willnilges): set host and port to an env variable
-        window.open(`/static/noVNC/vnc.html?autoconnect=true&password=${vnc_params.password}&host=${vnc_params.host}&port=${vnc_params.port}&path=path?token=${vnc_params.token}`, '_blank');
-    }).catch(err => {
-        if (err) {
-            swal("Uh oh...", `Unable to start console for ${vmname}. Please try again later.`, "error");
-        } else {
-            swal.stopLoading();
-            swal.close();
-        }
-    });
+    window.open(`/console/${vmid}`, '_blank');
 });
 
 $(".delete-allowed-user").click(function(){
