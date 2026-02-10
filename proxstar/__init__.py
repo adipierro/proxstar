@@ -440,6 +440,51 @@ def pending_vms_api():
     return jsonify({'pending': target.pending_vms})
 
 
+@app.route('/api/vms')
+@auth.oidc_auth('default')
+def vms_api():
+    user = User(flask_session['userinfo']['preferred_username'])
+    view_user = request.args.get('user')
+    target = user
+    if view_user and view_user != user.name:
+        if not user.rtp:
+            abort(403)
+        target = User(view_user)
+    vms = target.vms if target.active or target.rtp else []
+    for pending_vm in target.pending_vms:
+        vm = next((vm for vm in vms if vm.get('name') == pending_vm.get('name')), None)
+        if vm:
+            vm['status'] = pending_vm['status']
+            vm['pending'] = True
+        else:
+            vms.append(pending_vm)
+    return jsonify({'vms': vms})
+
+
+@app.route('/api/running-vms')
+@auth.oidc_auth('default')
+def running_vms_api():
+    user = User(flask_session['userinfo']['preferred_username'])
+    if not user.rtp:
+        abort(403)
+    proxmox = connect_proxmox()
+    running = []
+    for vm in proxmox.cluster.resources.get(type='vm'):
+        status = vm.get('status')
+        if status not in ('running', 'paused'):
+            continue
+        running.append(
+            {
+                'vmid': vm.get('vmid'),
+                'name': vm.get('name'),
+                'node': vm.get('node'),
+                'pool': vm.get('pool'),
+                'status': status,
+            }
+        )
+    return jsonify({'vms': running})
+
+
 @app.route('/pools')
 def list_pools():
     user = User(flask_session['userinfo']['preferred_username'])

@@ -6,6 +6,8 @@ $(document).ready(function(){
     initPendingVmRefresh();
     initVmConsole();
     initPoolSessionTimers();
+    initVmListRefresh();
+    initRunningVmsRefresh();
 });
 
 function initSessionTimer() {
@@ -107,6 +109,63 @@ function initPendingVmRefresh() {
     setInterval(poll, pollIntervalMs);
 }
 
+function initVmListRefresh() {
+    const container = document.getElementById('vm-list');
+    if (!container) {
+        return;
+    }
+    const viewUser = container.dataset.viewUser;
+    const url = viewUser ? `/api/vms?user=${encodeURIComponent(viewUser)}` : '/api/vms';
+    const pollIntervalMs = 10000;
+    const update = () => {
+        fetch(url, { credentials: 'same-origin' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('vm-list-fetch-failed');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                const vms = Array.isArray(data.vms) ? data.vms : [];
+                const statusMap = new Map();
+                vms.forEach((vm) => {
+                    if (vm && vm.name) {
+                        statusMap.set(vm.name, {
+                            status: vm.status || 'no status yet',
+                            pending: Boolean(vm.pending),
+                        });
+                    }
+                });
+                const cards = document.querySelectorAll('.vm-card');
+                let shouldReload = false;
+                cards.forEach((card) => {
+                    const name = card.dataset.vmName;
+                    if (!name) {
+                        return;
+                    }
+                    const statusEl = card.querySelector('.vm-status-text');
+                    if (!statusMap.has(name)) {
+                        shouldReload = true;
+                        return;
+                    }
+                    const data = statusMap.get(name);
+                    if (statusEl) {
+                        statusEl.textContent = data.status;
+                    }
+                    card.dataset.pending = data.pending ? 'true' : 'false';
+                });
+                if (shouldReload || (cards.length !== vms.length)) {
+                    window.location.reload();
+                }
+            })
+            .catch(() => {
+                // Ignore transient failures; next poll will retry.
+            });
+    };
+    update();
+    setInterval(update, pollIntervalMs);
+}
+
 function initVmConsole() {
     const container = document.getElementById('vm-console');
     if (!container) {
@@ -197,6 +256,56 @@ function initPoolSessionTimers() {
             }
         }, 1000);
     });
+}
+
+function initRunningVmsRefresh() {
+    const table = document.getElementById('running-vms-table');
+    if (!table) {
+        return;
+    }
+    const tbody = table.querySelector('tbody');
+    const pollIntervalMs = 15000;
+    const update = () => {
+        fetch('/api/running-vms', { credentials: 'same-origin' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('running-vms-fetch-failed');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                const vms = Array.isArray(data.vms) ? data.vms : [];
+                if (!tbody) {
+                    return;
+                }
+                if (!vms.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center">No running VMs.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                vms.forEach((vm) => {
+                    const row = document.createElement('tr');
+                    const vmid = (vm && vm.vmid !== undefined && vm.vmid !== null) ? vm.vmid : '';
+                    const name = (vm && vm.name !== undefined && vm.name !== null) ? vm.name : '';
+                    const node = (vm && vm.node !== undefined && vm.node !== null) ? vm.node : '';
+                    const pool = (vm && vm.pool !== undefined && vm.pool !== null) ? vm.pool : '';
+                    const status = (vm && vm.status !== undefined && vm.status !== null) ? vm.status : '';
+                    row.innerHTML = `
+                        <td>${vmid}</td>
+                        <td>${name}</td>
+                        <td>${node}</td>
+                        <td>${pool}</td>
+                        <td>${status}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            })
+            .catch(() => {
+                // Ignore transient failures; next poll will retry.
+            });
+    };
+    update();
+    setInterval(update, pollIntervalMs);
 }
 
 function confirmDialog(url, confirm, confirmButton, complete, error, location, danger) {
@@ -941,9 +1050,13 @@ function change_for_template(obj) {
     }
 }
 
-$("#console-vm").click(function(){
+$(document).on('click', '#console-vm', function(){
     const vmname = $(this).data('vmname');
     const vmid = $(this).data('vmid');
+    if (!vmid) {
+        swal("Uh oh...", `Unable to start console for ${vmname}. Please try again later.`, "error");
+        return;
+    }
     window.open(`/console/${vmid}`, '_blank');
 });
 

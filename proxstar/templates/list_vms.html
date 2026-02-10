@@ -42,7 +42,7 @@
         {% else %}
             {% for vm in vms %}
                 <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
-                    <div class="card bg-light mb-3 vm-card" data-vm-name="{{ vm['name'] }}" data-pending="{{ 'true' if vm.get('pending', False) else 'false' }}">
+                    <div class="card bg-light mb-3 vm-card" data-vm-name="{{ vm['name'] }}" data-vm-id="{{ vm.get('vmid', '') }}" data-pending="{{ 'true' if vm.get('pending', False) else 'false' }}">
                         <div class="card-body text-center">
                             {% if not vm.get('pending', False) %}
                             <a href="/vm/{{ vm['vmid'] }}">

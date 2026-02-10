@@ -56,17 +56,13 @@
                                 {% endif %}
                             </div>
                         </div>
+                        {% if pool.get('session_remaining') is not none %}
                         <div class="text-center mt-2">
-                            {% if pool.get('session_remaining') is not none %}
                             <p class="pool-session-timer" data-session-remaining="{{ pool['session_remaining'] }}">
                                 Session time remaining: <span class="pool-session-remaining"></span>
                             </p>
-                            {% else %}
-                            <p class="pool-session-timer" data-session-remaining="">
-                                Session time remaining: <span class="pool-session-remaining">--:--:--</span>
-                            </p>
-                            {% endif %}
                         </div>
+                        {% endif %}
                         <div class="text-center">
                             <button class="btn btn-info proxstar-poolbtn edit-limit" data-user="{{ pool['user'] }}" data-cpu="{{ pool['limits']['cpu'] }}" data-mem="{{ pool['limits']['mem'] }}" data-disk="{{ pool['limits']['disk'] }}">EDIT</button>
                             {% if not pool['vms'] %}
@@ -101,6 +97,35 @@
             </div>
         {% endfor %}
     </div>
+    {% if user.rtp %}
+    <div class="row">
+        <div class="col-md-12 col-sm-12">
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <h3 class="panel-title">Running VMs (All Pools)</h3>
+                </div>
+                <div class="panel-body">
+                    <table class="table table-bordered table-striped" id="running-vms-table">
+                        <thead>
+                            <tr role="row">
+                                <th>VMID</th>
+                                <th>Name</th>
+                                <th>Node</th>
+                                <th>Pool</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td colspan="5" class="text-center">Loading...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 {% endblock %}

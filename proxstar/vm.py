@@ -1,4 +1,5 @@
 import json
+import re
 import urllib
 
 from flask import current_app as app
@@ -205,14 +206,10 @@ class VM:
         interfaces = []
         for key, _ in self.config.items():
             if 'net' in key:
-                mac = self.config[key].split(',')
-                valid_int_types = ['virtio', 'e1000', 'rtl8139', 'vmxnet3']
-                if any(int_type in mac[0] for int_type in valid_int_types):
-                    mac = mac[0].split('=')[1]
-                else:
-                    mac = mac[1].split('=')[1]
-                ip = ip_map.get(mac, 'No IP')
-                interfaces.append([key, mac, ip])
+                mac = self._extract_mac(self.config[key])
+                mac_key = mac.lower() if mac else None
+                ip = ip_map.get(mac_key, 'No IP')
+                interfaces.append([key, mac or 'unknown', ip])
         interfaces = sorted(interfaces, key=lambda x: x[0])
         return interfaces
 
@@ -228,6 +225,7 @@ class VM:
             mac = interface.get('hardware-address')
             if not mac:
                 continue
+            mac = mac.lower()
             for addr in interface.get('ip-addresses', []):
                 if addr.get('ip-address-type') != 'ipv4':
                     continue
@@ -237,6 +235,15 @@ class VM:
                 ip_map[mac] = ip
                 break
         return ip_map
+
+    @staticmethod
+    def _extract_mac(net_config):
+        if not net_config:
+            return None
+        match = re.search(r'([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})', net_config)
+        if match:
+            return match.group(1)
+        return None
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
     def create_net(self, int_type, bridge=None):
