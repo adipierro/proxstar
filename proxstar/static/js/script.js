@@ -5,6 +5,7 @@ $(document).ready(function(){
     initSessionTimer();
     initPendingVmRefresh();
     initVmConsole();
+    initPoolSessionTimers();
 });
 
 function initSessionTimer() {
@@ -12,13 +13,21 @@ function initSessionTimer() {
     if (!container.length) {
         return;
     }
+    const forceShow = String(container.data('force-show') || '').toLowerCase() === 'true';
     fetch('/session', {
         credentials: 'same-origin',
     }).then((response) => {
         return response.json();
     }).then((data) => {
         if (!data.running || data.remaining_seconds === null) {
-            container.hide();
+            if (!forceShow) {
+                container.hide();
+                return;
+            }
+            container.show();
+            const meta = $("#session-timer-meta");
+            meta.text('(no active session)');
+            $("#session-timer-remaining").text('--:--:--');
             return;
         }
         container.show();
@@ -109,30 +118,85 @@ function initVmConsole() {
     }
     const statusEl = document.getElementById('console-status');
     const frame = document.getElementById('console-frame');
-    fetch(`/console/vm/${vmid}`, {
-        credentials: 'same-origin',
-        method: 'post',
-    })
-        .then((response) => {
-            if (!response.ok) {
-                throw new Error('console-fetch-failed');
-            }
-            return response.json();
+    const connectConsole = () => {
+        if (statusEl) {
+            statusEl.textContent = 'Connecting to console...';
+        }
+        fetch(`/console/vm/${vmid}`, {
+            credentials: 'same-origin',
+            method: 'post',
         })
-        .then((vnc_params) => {
-            const src = `/static/noVNC/vnc.html?autoconnect=true&password=${encodeURIComponent(vnc_params.password)}&host=${encodeURIComponent(vnc_params.host)}&port=${encodeURIComponent(vnc_params.port)}&path=path?token=${encodeURIComponent(vnc_params.token)}`;
-            if (frame) {
-                frame.src = src;
-            }
-            if (statusEl) {
-                statusEl.textContent = 'Connected.';
-            }
-        })
-        .catch(() => {
-            if (statusEl) {
-                statusEl.textContent = 'Unable to start console. Please try again later.';
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('console-fetch-failed');
+                }
+                return response.json();
+            })
+            .then((vnc_params) => {
+                const src = `/static/noVNC/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&show_control_bar=1&showControlBar=1&resize=remote&scaling=scale&password=${encodeURIComponent(vnc_params.password)}&host=${encodeURIComponent(vnc_params.host)}&port=${encodeURIComponent(vnc_params.port)}&path=path?token=${encodeURIComponent(vnc_params.token)}`;
+                if (frame) {
+                    frame.src = src;
+                }
+                if (statusEl) {
+                    statusEl.textContent = 'Connected.';
+                }
+            })
+            .catch(() => {
+                if (statusEl) {
+                    statusEl.textContent = 'Unable to start console. Please try again later.';
+                }
+            });
+    };
+    connectConsole();
+    const reconnect = document.getElementById('console-reconnect');
+    if (reconnect) {
+        reconnect.addEventListener('click', () => {
+            connectConsole();
+        });
+    }
+    const fullscreen = document.getElementById('console-fullscreen');
+    if (fullscreen && frame) {
+        fullscreen.addEventListener('click', () => {
+            if (frame.requestFullscreen) {
+                frame.requestFullscreen();
+            } else if (frame.webkitRequestFullscreen) {
+                frame.webkitRequestFullscreen();
+            } else if (frame.mozRequestFullScreen) {
+                frame.mozRequestFullScreen();
+            } else if (frame.msRequestFullscreen) {
+                frame.msRequestFullscreen();
             }
         });
+    }
+}
+
+function initPoolSessionTimers() {
+    const timers = document.querySelectorAll('.pool-session-timer');
+    if (!timers.length) {
+        return;
+    }
+    const format = (remaining) => {
+        const hours = Math.floor(remaining / 3600);
+        const minutes = Math.floor((remaining % 3600) / 60);
+        const seconds = remaining % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    };
+    timers.forEach((timer) => {
+        const remainingEl = timer.querySelector('.pool-session-remaining');
+        let remaining = parseInt(timer.dataset.sessionRemaining, 10);
+        if (Number.isNaN(remaining)) {
+            return;
+        }
+        if (remainingEl) {
+            remainingEl.textContent = format(remaining);
+        }
+        setInterval(() => {
+            remaining = Math.max(0, remaining - 1);
+            if (remainingEl) {
+                remainingEl.textContent = format(remaining);
+            }
+        }, 1000);
+    });
 }
 
 function confirmDialog(url, confirm, confirmButton, complete, error, location, danger) {
@@ -900,6 +964,42 @@ $(".add-allowed-user").click(function(){
         method: 'post'
     }).then((response) => {
     location.reload();
+    });
+});
+
+$("#expire-all-sessions").click(function(){
+    swal({
+        title: "Expire all sessions?",
+        text: "This will force all running sessions to expire and trigger shutdown on the next check.",
+        icon: "warning",
+        buttons: {
+            cancel: true,
+            action: {
+                text: "Expire",
+                closeModal: false,
+                className: "swal-button--danger",
+            }
+        },
+        dangerMode: true,
+    }).then((willExpire) => {
+        if (willExpire) {
+            fetch('/admin/sessions/expire', {
+                credentials: 'same-origin',
+                method: 'post',
+            }).then((response) => {
+                if (!response.ok) {
+                    throw new Error('expire_failed');
+                }
+                return response.json();
+            }).then((data) => {
+                const count = data && typeof data.expired === 'number' ? data.expired : 0;
+                swal(`Expired ${count} sessions.`, {
+                    icon: "success",
+                });
+            }).catch(() => {
+                swal("Uh oh...", "Unable to expire sessions. Please try again later.", "error");
+            });
+        }
     });
 });
 

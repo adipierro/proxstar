@@ -69,6 +69,8 @@ from proxstar.session import (
     clear_session,
     get_session_start,
     set_session_start,
+    SESSION_KEY_PREFIX,
+    SESSION_SHUTDOWN_PREFIX,
 )
 from proxstar.sdn import ensure_student_network
 
@@ -244,6 +246,14 @@ def _get_running_vms(user):
     return running
 
 
+def _get_session_remaining(username):
+    session_start = get_session_start(redis_conn, username)
+    if session_start is None:
+        return None
+    timeout_seconds = int(app.config['SESSION_TIMEOUT_HOURS'] * 3600)
+    return max(0, int(timeout_seconds - (time.time() - session_start)))
+
+
 def _ensure_session_started(user):
     if get_session_start(redis_conn, user.name) is None:
         set_session_start(redis_conn, user.name)
@@ -252,6 +262,19 @@ def _ensure_session_started(user):
 def _clear_session_if_idle(user):
     if not _get_running_vms(user):
         clear_session(redis_conn, user.name)
+
+
+def _expire_all_sessions():
+    timeout_seconds = int(app.config['SESSION_TIMEOUT_HOURS'] * 3600)
+    expired_at = time.time() - timeout_seconds - 1
+    expired = 0
+    for raw_key in redis_conn.scan_iter(f'{SESSION_KEY_PREFIX}*'):
+        key = raw_key.decode('utf-8') if isinstance(raw_key, bytes) else str(raw_key)
+        user = key[len(SESSION_KEY_PREFIX) :]
+        redis_conn.set(key, str(expired_at))
+        redis_conn.delete(f'{SESSION_SHUTDOWN_PREFIX}{user}')
+        expired += 1
+    return expired
 
 
 def _get_vm_or_404(vmid):
@@ -424,6 +447,9 @@ def list_pools():
         user.rtp = False
     proxmox = connect_proxmox()
     user_pools = get_pool_cache(db) if user.rtp else []
+    if user.rtp:
+        for pool in user_pools:
+            pool['session_remaining'] = _get_session_remaining(pool['user'])
     shared_pools = map(
         lambda pool: {
             'name': pool.name,
@@ -863,6 +889,20 @@ def delete_user(user):
         return '', 200
     else:
         return '', 403
+
+
+@app.route('/admin/sessions/expire', methods=['POST'])
+@auth.oidc_auth('default')
+def expire_sessions():
+    user = User(flask_session['userinfo']['preferred_username'])
+    if not user.rtp:
+        return '', 403
+    expired = _expire_all_sessions()
+    try:
+        q.enqueue(enforce_session_timeouts_task, job_timeout=120)
+    except Exception as e:  # pylint: disable=broad-except
+        logging.warning('Failed to enqueue session enforcement: %s', e)
+    return jsonify({'expired': expired})
 
 
 @app.route('/settings')

@@ -56,6 +56,17 @@
                                 {% endif %}
                             </div>
                         </div>
+                        <div class="text-center mt-2">
+                            {% if pool.get('session_remaining') is not none %}
+                            <p class="pool-session-timer" data-session-remaining="{{ pool['session_remaining'] }}">
+                                Session time remaining: <span class="pool-session-remaining"></span>
+                            </p>
+                            {% else %}
+                            <p class="pool-session-timer" data-session-remaining="">
+                                Session time remaining: <span class="pool-session-remaining">--:--:--</span>
+                            </p>
+                            {% endif %}
+                        </div>
                         <div class="text-center">
                             <button class="btn btn-info proxstar-poolbtn edit-limit" data-user="{{ pool['user'] }}" data-cpu="{{ pool['limits']['cpu'] }}" data-mem="{{ pool['limits']['mem'] }}" data-disk="{{ pool['limits']['disk'] }}">EDIT</button>
                             {% if not pool['vms'] %}
