@@ -1,12 +1,14 @@
 from math import ceil
 
+from flask import current_app as app
+
 from proxmoxer.core import ResourceException
 from rq.registry import StartedJobRegistry
 
 from proxstar.ldapdb import is_active, is_user, is_current_student
 from proxstar import db, q, redis_conn
 from proxstar.db import get_allowed_users, get_user_usage_limits, is_rtp, get_shared_pools
-from proxstar.proxmox import connect_proxmox, get_pools
+from proxstar.proxmox import connect_proxmox, get_pools, get_proxmox_userid
 from proxstar.util import lazy_property, default_repr
 from proxstar.vm import VM
 
@@ -118,12 +120,18 @@ class User:
         proxmox = connect_proxmox()
         proxmox.pools(self.name).delete()
         users = proxmox.access.users.get()
-        if any(user['userid'] == '{}@csh.rit.edu'.format(self.name) for user in users):
-            if (
-                'rtp'
-                not in proxmox.access.users('{}@csh.rit.edu'.format(self.name)).get()['groups']
-            ):
-                proxmox.access.users('{}@csh.rit.edu'.format(self.name)).delete()
+        userid = get_proxmox_userid(self.name)
+        if any(user['userid'] == userid for user in users):
+            protected_groups = app.config.get('PROXMOX_PROTECTED_GROUPS', [])
+            if protected_groups:
+                user_groups = proxmox.access.users(userid).get().get('groups', '')
+                if isinstance(user_groups, str):
+                    group_list = [g for g in user_groups.split(',') if g]
+                else:
+                    group_list = user_groups or []
+                if any(group in group_list for group in protected_groups):
+                    return
+            proxmox.access.users(userid).delete()
 
 
 def get_vms_for_rtp(proxmox, database):

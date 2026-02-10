@@ -114,15 +114,26 @@ $("#start-vm").click(function(){
     fetch(`/vm/${vmid}/power/start`, {
         credentials: 'same-origin',
         method: 'post'
-    }).then((response) => {
+    }).then(async (response) => {
+        if (!response.ok) {
+            const text = await response.text();
+            if (text === 'expired') {
+                throw new Error('expired');
+            }
+            throw new Error('start_failed');
+        }
         return swal(`${vmname} is now starting!`, {
             icon: "success",
-        }); 
+        });
     }).then(() => {
         window.location = `/vm/${vmid}`;
     }).catch(err => {
         if (err) {
-            swal("Uh oh...", `Unable to start ${vmname}. Please try again later.`, "error");
+            if (err.message === 'expired') {
+                swal("Expired VM", `${vmname} is expired and cannot be started.`, "error");
+            } else {
+                swal("Uh oh...", `Unable to start ${vmname}. Please try again later.`, "error");
+            }
         } else {
             swal.stopLoading();
             swal.close();
@@ -136,15 +147,26 @@ $("#resume-vm").click(function(){
     fetch(`/vm/${vmid}/power/resume`, {
         credentials: 'same-origin',
         method: 'post'
-    }).then((response) => {
+    }).then(async (response) => {
+        if (!response.ok) {
+            const text = await response.text();
+            if (text === 'expired') {
+                throw new Error('expired');
+            }
+            throw new Error('resume_failed');
+        }
         return swal(`${vmname} is now resuming!`, {
             icon: "success",
-        }); 
+        });
     }).then(() => {
         window.location = `/vm/${vmid}`;
     }).catch(err => {
         if (err) {
-            swal("Uh oh...", `Unable to resume ${vmname}. Please try again later.`, "error");
+            if (err.message === 'expired') {
+                swal("Expired VM", `${vmname} is expired and cannot be resumed.`, "error");
+            } else {
+                swal("Uh oh...", `Unable to resume ${vmname}. Please try again later.`, "error");
+            }
         } else {
             swal.stopLoading();
             swal.close();

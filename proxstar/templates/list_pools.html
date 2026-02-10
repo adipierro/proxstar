@@ -6,7 +6,12 @@
             <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
                 <div class="card bg-light mb-3">
                     <div class="card-header text-center">
-                        <img class="user-img float-left" src="https://profiles.csh.rit.edu/image/{{ pool['user'] }}" title="{{ pool['user'] }}">
+                        {% set pool_img = profile_image_url(pool['user']) %}
+                        {% if pool_img %}
+                        <img class="user-img float-left" src="{{ pool_img }}" title="{{ pool['user'] }}">
+                        {% else %}
+                        <i class="fas fa-user-circle"></i>
+                        {% endif %}
                         <h5 class="card-title user-title">
                             <a href="/user/{{ pool['user'] }}">
                                 {{ pool['user'] }}

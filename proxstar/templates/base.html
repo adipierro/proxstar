@@ -6,8 +6,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#B0197E">
-    <link rel="shortcut icon" href="https://assets.csh.rit.edu/uploads/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="https://themeswitcher.csh.rit.edu/api/get" media="screen">
+    {% if config.get('FAVICON_URL') %}
+    <link rel="shortcut icon" href="{{ config['FAVICON_URL'] }}" type="image/x-icon">
+    {% endif %}
+    {% if config.get('THEME_CSS_URL') %}
+    <link rel="stylesheet" href="{{ config['THEME_CSS_URL'] }}" media="screen">
+    {% endif %}
     <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="/static/css/circle.css">
     <script>
@@ -85,7 +89,12 @@
                 <ul class="nav navbar-nav ml-auto">
                     <li class="nav-item navbar-user dropdown">
                         <a class="nav-link dropdown-toggle" data-toggle="dropdown" href="#" id="user01">
-                            <img src="https://profiles.csh.rit.edu/image/{{ user.name }}">
+                            {% set profile_url = profile_image_url() %}
+                            {% if profile_url %}
+                            <img src="{{ profile_url }}">
+                            {% else %}
+                            <i class="fas fa-user-circle"></i>
+                            {% endif %}
                             {{ user.name }}
                             <span class="caret"></span>
                         </a>

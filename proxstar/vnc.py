@@ -45,7 +45,7 @@ def add_vnc_target(node, port):
     targets = get_vnc_targets()
     target = next((target for target in targets if target['host'] == f'{node}:{port}'), None)
     if target:
-        print('Host is already in the targets file')
+        logging.info('Host is already in the targets file')
         return target['token']
     else:
         target_file = open(app.config['WEBSOCKIFY_TARGET_FILE'], 'a')

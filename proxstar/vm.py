@@ -255,7 +255,7 @@ class VM:
                     proxmox.nodes(self.node).qemu(self.id).config.post(**{name: net_value})
                     return True
                 except Exception as e:
-                    print(e)
+                    app.logger.error('Failed to create network interface: %s', e)
                     raise e
             i += 1
 

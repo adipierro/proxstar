@@ -241,13 +241,54 @@ def _clear_session_if_idle(user):
         clear_session(redis_conn, user.name)
 
 
+def _get_claim(info, path):
+    if not path:
+        return None
+    cur = info
+    for part in path.split('.'):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+        if cur is None:
+            return None
+    return cur
+
+
+def _profile_image_url(username=None):
+    info = session.get('userinfo', {})
+    current_username = info.get('preferred_username')
+    if username is None:
+        username = current_username
+    if username and username == current_username:
+        claim = app.config.get('OIDC_PROFILE_IMAGE_CLAIM', 'picture')
+        url = _get_claim(info, claim)
+        if isinstance(url, str) and url:
+            return url
+    base = app.config.get('PROFILE_IMAGE_URL_BASE', '')
+    if base and username:
+        return f"{base.rstrip('/')}/{username}"
+    return None
+
+
+@app.context_processor
+def inject_profile_helpers():
+    return {'profile_image_url': _profile_image_url}
+
+
+def _node_fqdn(node):
+    domain = app.config.get('PROXMOX_NODE_DOMAIN', '')
+    if domain:
+        return f'{node}.{domain}'
+    return node
+
+
 @app.errorhandler(404)
 def not_found(e):
     try:
         user = User(session['userinfo']['preferred_username'])
         return render_template('404.html', user=user, e=e), 404
     except KeyError as exception:
-        print(exception)
+        logging.warning('Missing userinfo in session for 404: %s', exception)
         return render_template('404.html', user='chom', e=e), 404
 
 
@@ -257,7 +298,7 @@ def forbidden(e):
         user = User(session['userinfo']['preferred_username'])
         return render_template('403.html', user=user, e=e), 403
     except KeyError as exception:
-        print(exception)
+        logging.warning('Missing userinfo in session for 403: %s', exception)
         return render_template('403.html', user='chom', e=e), 403
 
 
@@ -386,11 +427,17 @@ def vm_power(vmid, action):
         try:
             vnc_token = redis_conn.get(vnc_token_key).decode('utf-8')
         except AttributeError as e:
-            print(
-                f'Warning: Could not get vnc_token during {action}:{e}. {action} is still being performed.'
+            logging.warning(
+                'Could not get vnc_token during %s: %s. Action is still being performed.',
+                action,
+                e,
             )
         if action == 'start':
             vmconfig = vm.config
+            if app.config.get('ENABLE_VM_EXPIRATION'):
+                expire_date = vm.expire
+                if expire_date < datetime.date.today():
+                    return 'expired', 400
             usage_check = user.check_usage(vmconfig['cores'], vmconfig['memory'], 0)
             if usage_check:
                 return usage_check
@@ -417,6 +464,10 @@ def vm_power(vmid, action):
                 redis_conn.delete(vnc_token_key)
             _clear_session_if_idle(user)
         elif action == 'resume':
+            if app.config.get('ENABLE_VM_EXPIRATION'):
+                expire_date = vm.expire
+                if expire_date < datetime.date.today():
+                    return 'expired', 400
             vm.resume()
             _ensure_session_started(user)
         return '', 200
@@ -432,10 +483,10 @@ def vm_console(vmid):
     if user.rtp or int(vmid) in user.allowed_vms:
         # import pdb; pdb.set_trace()
         vm = VM(vmid)
-        proxmox = connect_proxmox(f'{vm.node}.csh.rit.edu')
+        node_host = _node_fqdn(vm.node)
+        proxmox = connect_proxmox(node_host)
         vnc_ticket, vnc_port = open_vnc_session(vmid, vm.node, proxmox)
-        node = f'{vm.node}.csh.rit.edu'
-        token = add_vnc_target(node, vnc_port)
+        token = add_vnc_target(node_host, vnc_port)
         redis_conn.set(f'vnc_token|{vmid}', str(token))  # Store the VNC token in Redis.
         return {
             'host': app.config['VNC_HOST'],
@@ -850,18 +901,18 @@ def allowed_users(user):
 @app.route('/console/cleanup', methods=['POST'])
 def cleanup_vnc():
     if request.form['token'] == app.config['VNC_CLEANUP_TOKEN']:
-        print('Cleaning up targets file...')
+        logging.info('Cleaning up targets file...')
         with open(app.config['WEBSOCKIFY_TARGET_FILE'], 'w') as targets:
             targets.truncate()
-        print('Clearing vnc tokens from Redis...')
+        logging.info('Clearing vnc tokens from Redis...')
         count = 0
         ns_keys = 'vnc_token*'
         for key in redis_conn.scan_iter(ns_keys):
             redis_conn.delete(key)
             count += 1
-        print(f'Deleted {count} key(s).')
+        logging.info('Deleted %s key(s).', count)
         return '', 200
-    print('Got bad cleanup request')
+    logging.warning('Got bad cleanup request')
     return '', 403
 
 

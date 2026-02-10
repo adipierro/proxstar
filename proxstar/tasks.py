@@ -17,7 +17,6 @@ from proxstar.db import (
     store_pool_cache,
     get_template,
 )
-from proxstar.mail import send_vm_expire_email, send_rtp_vm_delete_email
 from proxstar.proxmox import connect_proxmox, get_pools
 from proxstar.sdn import ensure_student_network
 from proxstar.session import (
@@ -109,20 +108,13 @@ def process_expiring_vms_task():
         proxmox = connect_proxmox()
         db = connect_db()
         pools = get_pools(proxmox, db)
-        expired_vms = []
         for pool in pools:
             user = User(pool)
-            expiring_vms = []
             vms = user.vms
             for vm in vms:
                 vm = VM(vm['vmid'])
                 days = (vm.expire - datetime.date.today()).days
-                if days in [10, 7, 3, 1, 0, -1, -2, -3, -4, -5, -6]:
-                    expiring_vms.append([vm.id, vm.name, days])
-                    if days <= 0:
-                        expired_vms.append([vm.id, vm.name, days])
-                        vm.stop()
-                elif days <= -7:
+                if days <= -7:
                     logging.info(
                         'Deleting {} ({}) as it has been at least a week since expiration.'.format(
                             vm.name, vm.id
@@ -136,13 +128,11 @@ def process_expiring_vms_task():
                         delete_vnc_target(token=vnc_token)
                         redis_conn.delete(vnc_token_key)
                     except Exception as e:  # pylint: disable=W0703
-                        print(f'ERROR: Could not delete target from targets file: {e}')
+                        logging.error('Could not delete target from targets file: %s', e)
 
                     delete_vm_task(vm.id)
-            if expiring_vms:
-                send_vm_expire_email(pool, expiring_vms)
-        if expired_vms:
-            send_rtp_vm_delete_email(expired_vms)
+                elif days <= 0:
+                    vm.stop()
 
 
 def generate_pool_cache_task():
@@ -227,7 +217,7 @@ def cleanup_vnc_task():
             timeout=30,
         )
     except Exception as e:  # pylint: disable=W0703
-        print(e)
+        logging.error('VNC cleanup request failed: %s', e)
 
 
 def enforce_session_timeouts_task():

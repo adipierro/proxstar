@@ -16,7 +16,7 @@ FORCE_STANDARD_USER = environ.get('PROXSTAR_FORCE_STANDARD_USER', 'False').lower
 # Flask
 IP = environ.get('PROXSTAR_IP', '0.0.0.0')
 PORT = environ.get('PROXSTAR_PORT', '5000')
-SERVER_NAME = environ.get('PROXSTAR_SERVER_NAME', 'proxstar.csh.rit.edu')
+SERVER_NAME = environ.get('PROXSTAR_SERVER_NAME', 'localhost')
 SECRET_KEY = environ.get('PROXSTAR_SECRET_KEY', '')
 TESTING = environ.get('PROXSTAR_TESTING', 'False').lower() in ('true', '1', 't')
 DISABLE_AUTH = environ.get('PROXSTAR_DISABLE_AUTH', 'False').lower() in ('true', '1', 't')
@@ -24,13 +24,14 @@ LOCAL_USER = environ.get('PROXSTAR_LOCAL_USER', 'localuser')
 LOCAL_GROUPS = [g.strip() for g in environ.get('PROXSTAR_LOCAL_GROUPS', '').split(',') if g.strip()]
 
 # OIDC
-OIDC_ISSUER = environ.get('PROXSTAR_OIDC_ISSUER', 'https://sso.csh.rit.edu/auth/realms/csh')
+OIDC_ISSUER = environ.get('PROXSTAR_OIDC_ISSUER', 'https://example.com/oidc')
 OIDC_CLIENT_ID = environ.get('PROXSTAR_CLIENT_ID', 'proxstar')
 OIDC_CLIENT_SECRET = environ.get('PROXSTAR_CLIENT_SECRET', '')
 OIDC_GROUPS_CLAIM = environ.get('PROXSTAR_OIDC_GROUPS_CLAIM', 'groups')
 OIDC_ADMIN_GROUPS = [g.strip() for g in environ.get('PROXSTAR_OIDC_ADMIN_GROUPS', '').split(',') if g.strip()]
 OIDC_ACTIVE_GROUPS = [g.strip() for g in environ.get('PROXSTAR_OIDC_ACTIVE_GROUPS', '').split(',') if g.strip()]
 OIDC_STUDENT_GROUPS = [g.strip() for g in environ.get('PROXSTAR_OIDC_STUDENT_GROUPS', '').split(',') if g.strip()]
+OIDC_PROFILE_IMAGE_CLAIM = environ.get('PROXSTAR_OIDC_PROFILE_IMAGE_CLAIM', 'picture')
 
 # Proxmox
 PROXMOX_HOSTS = [host.strip() for host in environ.get('PROXSTAR_PROXMOX_HOSTS', '').split(',')]
@@ -39,6 +40,11 @@ PROXMOX_TOKEN_NAME = environ.get('PROXSTAR_PROXMOX_TOKEN_NAME', '')
 PROXMOX_TOKEN_VALUE = environ.get('PROXSTAR_PROXMOX_TOKEN_VALUE', '')
 PROXMOX_ISO_STORAGE = environ.get('PROXSTAR_PROXMOX_ISO_STORAGE', 'nfs-iso')
 PROXMOX_VM_STORAGE = environ.get('PROXSTAR_PROXMOX_VM_STORAGE', 'ceph')
+PROXMOX_USER_REALM = environ.get('PROXSTAR_PROXMOX_USER_REALM', '')
+PROXMOX_NODE_DOMAIN = environ.get('PROXSTAR_PROXMOX_NODE_DOMAIN', '')
+PROXMOX_PROTECTED_GROUPS = [
+    g.strip() for g in environ.get('PROXSTAR_PROXMOX_PROTECTED_GROUPS', '').split(',') if g.strip()
+]
 
 # Proxmox SDN
 SDN_ZONE = environ.get('PROXSTAR_SDN_ZONE', '')
@@ -96,9 +102,14 @@ REDIS_PORT = int(environ.get('PROXSTAR_REDIS_PORT', '6379'))
 # VNC
 WEBSOCKIFY_PATH = environ.get('PROXSTAR_WEBSOCKIFY_PATH', '/usr/local/bin/websockify')
 WEBSOCKIFY_TARGET_FILE = environ.get('PROXSTAR_WEBSOCKIFY_TARGET_FILE', '/opt/proxstar/targets')
-VNC_HOST = environ.get('PROXSTAR_VNC_HOST', 'proxstar-vnc.csh.rit.edu')
+VNC_HOST = environ.get('PROXSTAR_VNC_HOST', 'localhost')
 VNC_PORT = environ.get('PROXSTAR_VNC_PORT', '443')
 WEBSOCKIFY_PORT = environ.get('PROXSTAR_WEBSOCKIFY_PORT', '8081')
+
+# UI
+THEME_CSS_URL = environ.get('PROXSTAR_THEME_CSS_URL', 'https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css')
+FAVICON_URL = environ.get('PROXSTAR_FAVICON_URL', '')
+PROFILE_IMAGE_URL_BASE = environ.get('PROXSTAR_PROFILE_IMAGE_URL_BASE', '')
 
 # SENTRY
 # If you set the sentry dsn locally, make sure you use the local-dev or some

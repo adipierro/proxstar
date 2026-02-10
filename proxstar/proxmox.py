@@ -73,6 +73,13 @@ def get_pools(proxmox, db):
     return pools
 
 
+def get_proxmox_userid(username):
+    realm = app.config.get('PROXMOX_USER_REALM', '')
+    if realm:
+        return f'{username}@{realm}'
+    return username
+
+
 def is_hostname_valid(name):
     if not name or len(name) < 2:
         return False
