@@ -18,7 +18,7 @@ from flask import (
     render_template,
     request,
     redirect,
-    session,
+    session as flask_session,
     abort,
     url_for,
     jsonify,
@@ -118,14 +118,14 @@ class _LocalAuth(_DummyAuth):
 
             @wraps(fn)
             def wrapped(*f_args, **f_kwargs):
-                if 'userinfo' not in session:
-                    session['userinfo'] = {
+                if 'userinfo' not in flask_session:
+                    flask_flask_session['userinfo'] = {
                         'preferred_username': self.app.config.get('LOCAL_USER', 'localuser')
                     }
                     claim = self.app.config.get('OIDC_GROUPS_CLAIM', 'groups')
                     local_groups = self.app.config.get('LOCAL_GROUPS', [])
                     if local_groups:
-                        session['userinfo'][claim] = local_groups
+                        flask_flask_session['userinfo'][claim] = local_groups
                 return fn(*f_args, **f_kwargs)
 
             return wrapped
@@ -137,7 +137,7 @@ class _LocalAuth(_DummyAuth):
 
         @wraps(fn)
         def wrapped(*f_args, **f_kwargs):
-            session.clear()
+            flask_flask_session.clear()
             return fn(*f_args, **f_kwargs)
 
         return wrapped
@@ -208,7 +208,7 @@ def add_rq_dashboard_auth(blueprint):
     @blueprint.before_request
     @auth.oidc_auth('default')
     def rq_dashboard_auth(*args, **kwargs):  # pylint: disable=unused-argument,unused-variable
-        user = User(session['userinfo']['preferred_username'])
+        user = User(flask_session['userinfo']['preferred_username'])
         if not user.rtp:
             abort(403)
 
@@ -255,7 +255,7 @@ def _get_claim(info, path):
 
 
 def _profile_image_url(username=None):
-    info = session.get('userinfo', {})
+    info = flask_session.get('userinfo', {})
     current_username = info.get('preferred_username')
     if username is None:
         username = current_username
@@ -285,7 +285,7 @@ def _node_fqdn(node):
 @app.errorhandler(404)
 def not_found(e):
     try:
-        user = User(session['userinfo']['preferred_username'])
+        user = User(flask_session['userinfo']['preferred_username'])
         return render_template('404.html', user=user, e=e), 404
     except KeyError as exception:
         logging.warning('Missing userinfo in session for 404: %s', exception)
@@ -295,7 +295,7 @@ def not_found(e):
 @app.errorhandler(403)
 def forbidden(e):
     try:
-        user = User(session['userinfo']['preferred_username'])
+        user = User(flask_session['userinfo']['preferred_username'])
         return render_template('403.html', user=user, e=e), 403
     except KeyError as exception:
         logging.warning('Missing userinfo in session for 403: %s', exception)
@@ -306,7 +306,7 @@ def forbidden(e):
 @app.route('/user/<string:user_view>')
 @auth.oidc_auth('default')
 def list_vms(user_view=None):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if app.config['FORCE_STANDARD_USER']:
         user.rtp = False
@@ -340,7 +340,7 @@ def list_vms(user_view=None):
 @app.route('/pool/shared/<string:name>')
 @auth.oidc_auth('default')
 def list_shared_vms(name=None):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     pool = get_shared_pool(db, name)
     if pool:
         if user.name in pool.members or user.rtp:
@@ -357,7 +357,7 @@ def list_shared_vms(name=None):
 
 @app.route('/pools')
 def list_pools():
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     if app.config['FORCE_STANDARD_USER']:
         user.rtp = False
     proxmox = connect_proxmox()
@@ -397,7 +397,7 @@ def hostname(name):
 @app.route('/vm/<string:vmid>')
 @auth.oidc_auth('default')
 def vm_details(vmid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -417,7 +417,7 @@ def vm_details(vmid):
 @app.route('/vm/<string:vmid>/power/<string:action>', methods=['POST'])
 @auth.oidc_auth('default')
 def vm_power(vmid, action):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -478,7 +478,7 @@ def vm_power(vmid, action):
 @app.route('/console/vm/<string:vmid>', methods=['POST'])
 @auth.oidc_auth('default')
 def vm_console(vmid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     proxmox = connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         # import pdb; pdb.set_trace()
@@ -502,7 +502,7 @@ def vm_console(vmid):
 @app.route('/vm/<string:vmid>/cpu/<int:cores>', methods=['POST'])
 @auth.oidc_auth('default')
 def vm_cpu(vmid, cores):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -523,7 +523,7 @@ def vm_cpu(vmid, cores):
 @app.route('/vm/<string:vmid>/mem/<int:mem>', methods=['POST'])
 @auth.oidc_auth('default')
 def vm_mem(vmid, mem):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -544,7 +544,7 @@ def vm_mem(vmid, mem):
 @app.route('/vm/<string:vmid>/disk/create/<int:size>', methods=['POST'])
 @auth.oidc_auth('default')
 def create_disk(vmid, size):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -560,7 +560,7 @@ def create_disk(vmid, size):
 @app.route('/vm/<string:vmid>/disk/<string:disk>/resize/<int:size>', methods=['POST'])
 @auth.oidc_auth('default')
 def resize_disk(vmid, disk, size):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -576,7 +576,7 @@ def resize_disk(vmid, disk, size):
 @app.route('/vm/<string:vmid>/disk/<string:disk>/delete', methods=['POST'])
 @auth.oidc_auth('default')
 def delete_disk(vmid, disk):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -589,7 +589,7 @@ def delete_disk(vmid, disk):
 @app.route('/vm/<string:vmid>/iso/create', methods=['POST'])
 @auth.oidc_auth('default')
 def iso_create(vmid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -602,7 +602,7 @@ def iso_create(vmid):
 @app.route('/vm/<string:vmid>/iso/<string:iso_drive>/delete', methods=['POST'])
 @auth.oidc_auth('default')
 def iso_delete(vmid, iso_drive):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -615,7 +615,7 @@ def iso_delete(vmid, iso_drive):
 @app.route('/vm/<string:vmid>/iso/<string:iso_drive>/eject', methods=['POST'])
 @auth.oidc_auth('default')
 def iso_eject(vmid, iso_drive):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -628,7 +628,7 @@ def iso_eject(vmid, iso_drive):
 @app.route('/vm/<string:vmid>/iso/<string:iso_drive>/mount/<string:iso>', methods=['POST'])
 @auth.oidc_auth('default')
 def iso_mount(vmid, iso_drive, iso):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         iso = '{}:iso/{}'.format(app.config['PROXMOX_ISO_STORAGE'], iso)
@@ -642,7 +642,7 @@ def iso_mount(vmid, iso_drive, iso):
 @app.route('/vm/<string:vmid>/net/create', methods=['POST'])
 @auth.oidc_auth('default')
 def create_net_interface(vmid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -656,7 +656,7 @@ def create_net_interface(vmid):
 @app.route('/vm/<string:vmid>/net/<string:netid>/delete', methods=['POST'])
 @auth.oidc_auth('default')
 def delete_net_interface(vmid, netid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         vm = VM(vmid)
@@ -669,7 +669,7 @@ def delete_net_interface(vmid, netid):
 @app.route('/vm/<string:vmid>/delete', methods=['POST'])
 @auth.oidc_auth('default')
 def delete(vmid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         # send_stop_ssh_tunnel(vmid)
@@ -683,7 +683,7 @@ def delete(vmid):
 @app.route('/vm/<string:vmid>/boot_order', methods=['POST'])
 @auth.oidc_auth('default')
 def set_boot_order(vmid):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         boot_order = []
@@ -699,7 +699,7 @@ def set_boot_order(vmid):
 @app.route('/vm/create', methods=['GET', 'POST'])
 @auth.oidc_auth('default')
 def create():
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     proxmox = connect_proxmox()
     if user.active or user.rtp:
         if request.method == 'GET':
@@ -773,7 +773,7 @@ def create():
 @app.route('/limits/<string:user>', methods=['POST'])
 @auth.oidc_auth('default')
 def set_limits(user):
-    authuser = User(session['userinfo']['preferred_username'])
+    authuser = User(flask_session['userinfo']['preferred_username'])
     if authuser.rtp:
         cpu = request.form['cpu']
         mem = request.form['mem']
@@ -787,7 +787,7 @@ def set_limits(user):
 @app.route('/user/<string:user>/delete', methods=['POST'])
 @auth.oidc_auth('default')
 def delete_user(user):
-    authuser = User(session['userinfo']['preferred_username'])
+    authuser = User(flask_session['userinfo']['preferred_username'])
     if authuser.rtp:
         connect_proxmox()
         User(user).delete()
@@ -799,7 +799,7 @@ def delete_user(user):
 @app.route('/settings')
 @auth.oidc_auth('default')
 def settings():
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     if user.rtp:
         templates = get_templates(db)
         db_ignored_pools = get_ignored_pools(db)
@@ -818,7 +818,7 @@ def settings():
 @app.route('/pool/<string:pool>/ignore', methods=['POST', 'DELETE'])
 @auth.oidc_auth('default')
 def ignored_pools(pool):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     if user.rtp:
         if request.method == 'POST':
             add_ignored_pool(db, pool)
@@ -832,7 +832,7 @@ def ignored_pools(pool):
 @app.route('/pool/shared/create', methods=['GET', 'POST'])
 @auth.oidc_auth('default')
 def create_shared_pool():
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     if request.method == 'GET':
         return render_template('create_pool.html', user=user)
     elif request.method == 'POST':
@@ -854,7 +854,7 @@ def create_shared_pool():
 @app.route('/pool/shared/<string:name>/modify', methods=['POST'])
 @auth.oidc_auth('default')
 def modify_shared_pool(name):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     members = request.form['members'].split(',')
     if user.rtp:
         pool = get_shared_pool(db, name)
@@ -870,7 +870,7 @@ def modify_shared_pool(name):
 @app.route('/pool/shared/<string:name>/delete', methods=['POST'])
 @auth.oidc_auth('default')
 def delete_shared_pool(name):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     if user.rtp:
         pool = get_shared_pool(db, name)
         if pool:
@@ -887,7 +887,7 @@ def delete_shared_pool(name):
 @app.route('/user/<string:user>/allow', methods=['POST', 'DELETE'])
 @auth.oidc_auth('default')
 def allowed_users(user):
-    authuser = User(session['userinfo']['preferred_username'])
+    authuser = User(flask_session['userinfo']['preferred_username'])
     if authuser.rtp:
         if request.method == 'POST':
             add_allowed_user(db, user)
@@ -927,7 +927,7 @@ def template_disk(template_id):
 @app.route('/template/<string:template_id>/edit', methods=['POST'])
 @auth.oidc_auth('default')
 def template_edit(template_id):
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     if user.rtp:
         name = request.form['name']
         disk = request.form['disk']
@@ -954,7 +954,7 @@ def health():
 @app.route('/session')
 @auth.oidc_auth('default')
 def session_info():
-    user = User(session['userinfo']['preferred_username'])
+    user = User(flask_session['userinfo']['preferred_username'])
     running_vms = _get_running_vms(user)
     session_start = get_session_start(redis_conn, user.name)
     if running_vms and session_start is None:
