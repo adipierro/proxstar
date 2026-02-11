@@ -96,9 +96,12 @@ class VM:
         proxmox.nodes(self.node).qemu(self.id).status.reset.post()
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-    def suspend(self):
+    def suspend(self, todisk=False):
         proxmox = connect_proxmox()
-        proxmox.nodes(self.node).qemu(self.id).status.suspend.post()
+        if todisk:
+            proxmox.nodes(self.node).qemu(self.id).status.suspend.post(todisk=1)
+        else:
+            proxmox.nodes(self.node).qemu(self.id).status.suspend.post()
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
     def resume(self):
@@ -131,7 +134,10 @@ class VM:
         boot_order = {'legacy': False, 'order': []}
         try:
             # Proxmox version does not support 'order=' format
-            if float(proxmox.nodes(self.node).version.get()['release']) < 6.3:
+            release_str = proxmox.nodes(self.node).version.get().get('release', '')
+            match = re.search(r'\d+(?:\.\d+)?', str(release_str))
+            release = float(match.group(0)) if match else 6.3
+            if release < 6.3:
                 boot_order['legacy'] = True
                 for order in raw_boot_order:
                     boot_order['order'].append({'device': boot_order_lookup[order]})
@@ -139,6 +145,8 @@ class VM:
             elif raw_boot_order.startswith('order='):
                 # Add enabled boot devices
                 for order in raw_boot_order[6:].split(';'):
+                    if not order:
+                        continue
                     boot_order['order'].append(
                         {'device': order, 'description': self.config.get(order), 'enabled': True}
                     )
@@ -168,7 +176,7 @@ class VM:
                     if order == 'c':
                         disks = [disk[0] for disk in self.disks]
                         if self.config.get('bootdisk'):
-                            boot_order.append(self.config['bootdisk'])
+                            devices.append(self.config['bootdisk'])
                             disks.remove(self.config['bootdisk'])
                         devices.extend(disks)
                     elif order == 'd':
@@ -181,6 +189,23 @@ class VM:
                 )
         except:
             return {'legacy': False, 'order': []}
+        if not boot_order['order']:
+            fallback_devices = []
+            for key, _val in self.config.items():
+                if key == 'scsihw':
+                    continue
+                if key.startswith(('scsi', 'sata', 'ide', 'virtio', 'net')):
+                    fallback_devices.append(key)
+            if self.config.get('bootdisk') and self.config['bootdisk'] not in fallback_devices:
+                fallback_devices.insert(0, self.config['bootdisk'])
+            for device in sorted(set(fallback_devices)):
+                boot_order['order'].append(
+                    {
+                        'device': device,
+                        'description': self.config.get(device),
+                        'enabled': False,
+                    }
+                )
         return boot_order
 
     @lazy_property

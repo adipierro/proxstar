@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 
-<div class="container">
+<div class="container" id="vm-details" data-vmid="{{ vm.id }}" data-usage-disk="0" data-limit-disk="{{ limits['disk'] }}">
     <div class="row">
         <div class="col-md-3 col-md-pull-3 col-sm-12">
             <div class="card bg-light mb-3">
@@ -12,63 +12,47 @@
                     <ul class="nav nav-list">
                         <li class="nav-header">Boot Order</li>
                         <li>
-                            {{ vm.boot_order['order']|selectattr('enabled')|map(attribute='device')|join(', ') }}
-                            <button class="btn btn-default proxstar-vmbtn" id="edit-boot-order" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}" data-boot_order="{{ vm.boot_order_json }}">
+                            <span id="boot-order-text" class="text-muted">
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                Loading…
+                            </span>
+                            <button class="btn btn-default proxstar-vmbtn" id="edit-boot-order" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}" data-boot_order="" disabled>
                                 <i class="fas fa-cog"></i>
                             </button>
                         </li>
                         <li class="nav-header">Interfaces</li>
-                        {% for interface in vm.interfaces %}
-                        <li>{{ interface[0] }}: {{ interface[2] }}
-                        <button class="btn btn-danger proxstar-vmbtn delete-net" id="delete-net" name="delete" data-vmid="{{ vm.id }}" data-interface="{{ interface[0] }}">
-                            <i class="fas fa-trash"></i>
-                        </button>
-			</li>
-                        {% endfor %}
-			<li>
-			    <button class="btn btn-success proxstar-vmbtn" id="create-net" name="create" data-vmid="{{ vm.id }}">
-				<i class="fas fa-plus"></i>
-			    </button>
-			</li>
-			<li class="nav-header">Disks</li>
-                        {% for disk in vm.disks %}
+                        <li id="interfaces-loading" class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            Loading…
+                        </li>
+                        <li id="interfaces-empty" class="text-muted d-none">No interfaces</li>
                         <li>
-                            {{ disk[0] }}: {{ disk[1] }}GB
-                            <button class="btn btn-default proxstar-vmbtn resize-disk" id="resize-disk" name="resize" data-vmid="{{ vm.id }}" data-disk="{{ disk[0] }}" data-usage="{{ usage['disk'] }}" data-limit="{{ limits['disk'] }}">
-                                <i class="fas fa-cog"></i>
+                            <button class="btn btn-success proxstar-vmbtn" id="create-net" name="create" data-vmid="{{ vm.id }}">
+                                <i class="fas fa-plus"></i>
                             </button>
-			    <button class="btn btn-danger proxstar-vmbtn delete-disk" id="delete-disk" name="delete" data-vmid="{{ vm.id }}" data-disk="{{ disk[0] }}">
-				<i class="fas fa-trash"></i>
-			    </button>
                         </li>
-			<li>
-			    <button class="btn btn-success proxstar-vmbtn" id="create-disk" name="create" data-vmid="{{ vm.id }}" data-usage="{{ usage['disk'] }}" data-limit="{{ limits['disk'] }}">
-				<i class="fas fa-plus"></i>
-			    </button>
-			</li>
-                        {% endfor %}
+			<li class="nav-header">Disks</li>
+                        <li id="disks-loading" class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            Loading…
+                        </li>
+                        <li id="disks-empty" class="text-muted d-none">No disks</li>
+                        <li>
+                            <button class="btn btn-success proxstar-vmbtn" id="create-disk" name="create" data-vmid="{{ vm.id }}" data-usage="0" data-limit="{{ limits['disk'] }}">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </li>
                         <li class="nav-header">ISO</li>
-			{% for iso in vm.isos %}
-			<li>
-			    {{iso[0]}}: {{iso[1]}}
-                            <button class="btn btn-default proxstar-vmbtn change-iso" id="change-iso" name="change" data-vmid="{{ vm.id }}" data-iso="{{ iso[0] }}">
-                                <i class="fas fa-cog"></i>
-                            </button>
-                            {% if iso[1] != 'None' %}
-                            <button class="btn btn-warning proxstar-vmbtn eject-iso" id="eject-iso" name="eject" data-vmid="{{ vm.id }}" data-iso="{{ iso[0] }}">
-                                <i class="fas fa-eject"></i>
-                            </button>
-                            {% endif %}
-			    <button class="btn btn-danger proxstar-vmbtn delete-iso" id="delete-iso" name="delete" data-vmid="{{ vm.id }}" data-iso="{{ iso[0] }}">
-				<i class="fas fa-trash"></i>
-			    </button>
+                        <li id="isos-loading" class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            Loading…
                         </li>
-			{% endfor %}
-			<li>
-			    <button class="btn btn-success proxstar-vmbtn" id="create-iso" name="create" data-vmid="{{ vm.id }}">
-				<i class="fas fa-plus"></i>
-			    </button>
-			</li>
+                        <li id="isos-empty" class="text-muted d-none">No ISO drives</li>
+                        <li>
+                            <button class="btn btn-success proxstar-vmbtn" id="create-iso" name="create" data-vmid="{{ vm.id }}">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </li>
                     </ul>
                 </div>
             </div>
@@ -81,42 +65,39 @@
                 <div class="card-body">
                     <dl class="dl-horizontal">
                         <dt>Name</dt>
-                        <dd>{{ vm.name }}</dd>
+                        <dd id="vm-name" class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            Loading…
+                        </dd>
                         <dt>ID</dt>
                         <dd>{{ vm.id }}</dd>
                         <dt>Status</dt>
-                        <dd>{{ vm.qmpstatus }}</dd>
+                        <dd id="vm-status" class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            Loading…
+                        </dd>
                         <dt>Node</dt>
-                        <dd>{{ vm.node }}</dd>
+                        <dd id="vm-node" class="text-muted">
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            Loading…
+                        </dd>
                         <dt>Cores</dt>
                         <dd>
-                            {{ vm.cpu }}
-                            {% if vm.qmpstatus == 'running' or vm.qmpstatus == 'suspended' or vm.qmpstatus == 'paused' %}
-                            <button class="btn btn-default proxstar-vmbtn" id="change-cores" data-vmid="{{ vm.id }}" data-usage="{{ usage['cpu'] - vm.cpu }}" data-limit="{{ limits['cpu'] }}">
+                            <span id="vm-cpu" class="text-muted">
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            </span>
+                            <button class="btn btn-default proxstar-vmbtn" id="change-cores" data-vmid="{{ vm.id }}" data-usage="0" data-limit="{{ limits['cpu'] }}" disabled>
                                 <i class="fas fa-cog"></i>
                             </button>
-                            {% else %}
-                            <button class="btn btn-default proxstar-vmbtn" id="change-cores" data-vmid="{{ vm.id }}" data-usage=0 data-limit="{{ limits['cpu'] }}">
-                                <i class="fas fa-cog"></i>
-                            </button>
-                            {% endif %}
                         </dd>
                         <dt>Memory</dt>
                         <dd>
-                            {% if vm.mem | int < 1024 %}
-                            {{ vm.mem }}MB
-                            {% else %}
-                            {{ vm.mem | int // 1024 }}GB
-                            {% endif %}
-                            {% if vm.qmpstatus == 'running' or vm.qmpstatus == 'suspended' or vm.qmpstatus == 'paused' %}
-                            <button class="btn btn-default proxstar-vmbtn" id="change-mem" data-vmid="{{ vm.id }}" data-usage="{{ usage['mem'] | int - vm.config['memory'] | int // 1024 }}" data-limit="{{ limits['mem'] }}">
+                            <span id="vm-mem" class="text-muted">
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            </span>
+                            <button class="btn btn-default proxstar-vmbtn" id="change-mem" data-vmid="{{ vm.id }}" data-usage="0" data-limit="{{ limits['mem'] }}" disabled>
                                 <i class="fas fa-cog"></i>
                             </button>
-                            {% else %}
-                            <button class="btn btn-default proxstar-vmbtn" id="change-mem" data-vmid="{{ vm.id }}" data-usage=0 data-limit="{{ limits['mem'] }}">
-                                <i class="fas fa-cog"></i>
-                            </button>
-                            {% endif %}
                         </dd>
                     </dl>
                 </div>
@@ -128,30 +109,21 @@
                     <h3 class="card-title">Actions</h3>
                 </div>
                 <div class="card-body text-center">
-                    {% if vm.qmpstatus == 'stopped' %}
-                    {% if not usage_check %}
-                    <button class="btn btn-success proxstar-actionbtn" id="start-vm" name="start" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">START</button>
-                    {% else %}
-                    Insufficient resources to start VM.
-                    {% endif %}
-                    {% endif %}
-                    {% if vm.qmpstatus == 'suspended' or vm.qmpstatus == 'paused' %}
-                    <button class="btn btn-success proxstar-actionbtn" id="resume-vm" name="resume" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">RESUME</button>
-                    {% endif %}
-                    {% if vm.qmpstatus == 'running' or vm.qmpstatus == 'suspended' or vm.qmpstatus == 'paused' %}
-                    {% if vm.qmpstatus == 'running' %}
-                    <a class="btn btn-success proxstar-actionbtn" href="/console/{{ vm.id }}" target="_blank" rel="noopener">CONSOLE</a>
-                    <button class="btn btn-info proxstar-actionbtn" id="suspend-vm" name="suspend" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">SUSPEND</button>
-                    {% endif %}
-                    <button class="btn btn-info proxstar-actionbtn" id="shutdown-vm" name="shutdown" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">SHUTDOWN</button>
-                    <button class="btn btn-warning proxstar-actionbtn" id="stop-vm" name="stop" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">STOP</button>
-                    <button class="btn btn-warning proxstar-actionbtn" id="reset-vm" name="reset" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">RESET</button>
-                    {% endif %}
-                    {% if vm.qmpstatus == 'stopped' %}
-                    <button class="btn btn-danger proxstar-actionbtn" id="delete-vm" name="delete" data-vmid="{{ vm.id }}" data-vmname="{{ vm.name }}">DELETE</button>
-                    {% else %}
-                    To delete VM, power it off.
-                    {% endif %}
+                    <div id="actions-loading" class="text-muted">
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        Loading actions…
+                    </div>
+                    <button class="btn btn-success proxstar-actionbtn d-none" id="start-vm" name="start" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}" disabled>START</button>
+                    <div id="start-vm-message" class="text-muted small d-none">Checking resources…</div>
+                    <button class="btn btn-success proxstar-actionbtn d-none" id="resume-vm" name="resume" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">RESUME</button>
+                    <a class="btn btn-success proxstar-actionbtn d-none" id="console-vm" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}" href="/console/{{ vm.id }}" target="_blank" rel="noopener">CONSOLE</a>
+                    <button class="btn btn-info proxstar-actionbtn d-none" id="suspend-vm" name="pause" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">PAUSE</button>
+                    <button class="btn btn-warning proxstar-actionbtn d-none" id="hibernate-vm" name="suspend" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">HIBERNATE</button>
+                    <button class="btn btn-info proxstar-actionbtn d-none" id="shutdown-vm" name="shutdown" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">SHUTDOWN</button>
+                    <button class="btn btn-warning proxstar-actionbtn d-none" id="stop-vm" name="stop" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">STOP</button>
+                    <button class="btn btn-warning proxstar-actionbtn d-none" id="reset-vm" name="reset" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">RESET</button>
+                    <button class="btn btn-danger proxstar-actionbtn d-none" id="delete-vm" name="delete" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">DELETE</button>
+                    <div id="delete-vm-hint" class="text-muted small d-none">To delete VM, power it off.</div>
                 </div>
             </div>
         </div>

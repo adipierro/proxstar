@@ -11,6 +11,7 @@ else:
 app.config.from_pyfile(config)
 
 timeout = app.config['TIMEOUT']
+workers = app.config.get('GUNICORN_WORKERS', 2)
 
 
 def start_websockify(websockify_path, target_file):

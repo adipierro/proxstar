@@ -8,6 +8,8 @@ $(document).ready(function(){
     initPoolSessionTimers();
     initVmListRefresh();
     initRunningVmsRefresh();
+    initPageLoader();
+    initVmHardware();
 });
 
 function initSessionTimer() {
@@ -16,42 +18,52 @@ function initSessionTimer() {
         return;
     }
     const forceShow = String(container.data('force-show') || '').toLowerCase() === 'true';
-    fetch('/session', {
-        credentials: 'same-origin',
-    }).then((response) => {
-        return response.json();
-    }).then((data) => {
-        if (!data.running || data.remaining_seconds === null) {
-            if (!forceShow) {
-                container.hide();
+    const remainingEl = $("#session-timer-remaining");
+    const meta = $("#session-timer-meta");
+    let endTs = null;
+    const tick = () => {
+        if (!endTs) {
+            return;
+        }
+        const remaining = Math.max(0, Math.floor((endTs - Date.now()) / 1000));
+        const hours = Math.floor(remaining / 3600);
+        const minutes = Math.floor((remaining % 3600) / 60);
+        const seconds = remaining % 60;
+        remainingEl.text(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
+        if (remaining <= 0) {
+            meta.text('(session expired)');
+        }
+    };
+    const fetchSession = () => {
+        fetch('/session', {
+            credentials: 'same-origin',
+        }).then((response) => {
+            return response.json();
+        }).then((data) => {
+            if (!data.running || data.remaining_seconds === null) {
+                endTs = null;
+                if (!forceShow) {
+                    container.hide();
+                    return;
+                }
+                container.show();
+                meta.text('(no active session)');
+                remainingEl.text('--:--:--');
                 return;
             }
             container.show();
-            const meta = $("#session-timer-meta");
-            meta.text('(no active session)');
-            $("#session-timer-remaining").text('--:--:--');
-            return;
-        }
-        container.show();
-        const meta = $("#session-timer-meta");
-        meta.text(`(running VMs: ${data.running_vms})`);
-        const remainingEl = $("#session-timer-remaining");
-        const end = Date.now() + (data.remaining_seconds * 1000);
-        const tick = () => {
-            const remaining = Math.max(0, Math.floor((end - Date.now()) / 1000));
-            const hours = Math.floor(remaining / 3600);
-            const minutes = Math.floor((remaining % 3600) / 60);
-            const seconds = remaining % 60;
-            remainingEl.text(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
-            if (remaining <= 0) {
-                meta.text('(session expired)');
+            meta.text(`(running VMs: ${data.running_vms})`);
+            endTs = Date.now() + (data.remaining_seconds * 1000);
+            tick();
+        }).catch(() => {
+            if (!forceShow) {
+                container.hide();
             }
-        };
-        tick();
-        setInterval(tick, 1000);
-    }).catch(() => {
-        container.hide();
-    });
+        });
+    };
+    fetchSession();
+    setInterval(tick, 1000);
+    setInterval(fetchSession, 30000);
 }
 
 function initPendingVmRefresh() {
@@ -308,6 +320,541 @@ function initRunningVmsRefresh() {
     setInterval(update, pollIntervalMs);
 }
 
+function initPageLoader() {
+    const loader = document.getElementById('page-loader');
+    if (!loader) {
+        return;
+    }
+    const hide = () => loader.classList.add('hidden');
+    const show = () => loader.classList.remove('hidden');
+    if (document.readyState === 'complete') {
+        hide();
+        return;
+    }
+    window.addEventListener('load', hide);
+    document.addEventListener('click', (event) => {
+        const link = event.target.closest('a');
+        if (!link) {
+            return;
+        }
+        if (link.target && link.target !== '_self') {
+            return;
+        }
+        if (link.dataset.noLoader === 'true') {
+            return;
+        }
+        const href = link.getAttribute('href');
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) {
+            return;
+        }
+        try {
+            const url = new URL(href, window.location.href);
+            if (url.origin !== window.location.origin) {
+                return;
+            }
+        } catch (err) {
+            return;
+        }
+        show();
+    });
+    document.addEventListener('submit', (event) => {
+        if (event.defaultPrevented) {
+            return;
+        }
+        show();
+    });
+}
+
+function initVmHardware() {
+    const container = document.getElementById('vm-details');
+    if (!container) {
+        return;
+    }
+    const vmid = container.dataset.vmid;
+    if (!vmid) {
+        return;
+    }
+    let usageDisk = parseInt(container.dataset.usageDisk || '0', 10);
+    const limitDisk = parseInt(container.dataset.limitDisk || '0', 10);
+
+    const nameEl = document.getElementById('vm-name');
+    const nodeEl = document.getElementById('vm-node');
+    const cpuEl = document.getElementById('vm-cpu');
+    const memEl = document.getElementById('vm-mem');
+    const statusEl = document.getElementById('vm-status');
+
+    const startButton = document.getElementById('start-vm');
+    const startMessage = document.getElementById('start-vm-message');
+    const actionsLoading = document.getElementById('actions-loading');
+    const deleteHint = document.getElementById('delete-vm-hint');
+    const resumeButton = document.getElementById('resume-vm');
+    const consoleButton = document.getElementById('console-vm');
+    const suspendButton = document.getElementById('suspend-vm');
+    const hibernateButton = document.getElementById('hibernate-vm');
+    const shutdownButton = document.getElementById('shutdown-vm');
+    const stopButton = document.getElementById('stop-vm');
+    const resetButton = document.getElementById('reset-vm');
+    const deleteButton = document.getElementById('delete-vm');
+    const changeCoresButton = document.getElementById('change-cores');
+    const changeMemButton = document.getElementById('change-mem');
+
+    const bootText = document.getElementById('boot-order-text');
+    const bootButton = document.getElementById('edit-boot-order');
+
+    const interfacesLoading = document.getElementById('interfaces-loading');
+    const interfacesEmpty = document.getElementById('interfaces-empty');
+    const createNetButton = document.getElementById('create-net');
+
+    const disksLoading = document.getElementById('disks-loading');
+    const disksEmpty = document.getElementById('disks-empty');
+    const createDiskButton = document.getElementById('create-disk');
+
+    const isosLoading = document.getElementById('isos-loading');
+    const isosEmpty = document.getElementById('isos-empty');
+    const createIsoButton = document.getElementById('create-iso');
+
+    const setVisible = (el, visible) => {
+        if (!el) {
+            return;
+        }
+        el.classList.toggle('d-none', !visible);
+    };
+
+    const renderItems = (items, options) => {
+        const {
+            loadingEl,
+            emptyEl,
+            createButton,
+            renderItem,
+        } = options;
+        if (loadingEl) {
+            loadingEl.remove();
+        }
+        if (emptyEl) {
+            emptyEl.classList.add('d-none');
+        }
+        if (!items || !items.length) {
+            if (emptyEl) {
+                emptyEl.classList.remove('d-none');
+            }
+            return;
+        }
+        const anchor = createButton ? createButton.closest('li') : null;
+        const parent = anchor ? anchor.parentElement : (emptyEl ? emptyEl.parentElement : null);
+        if (!parent) {
+            return;
+        }
+        items.forEach((item) => {
+            const li = renderItem(item, parent);
+            if (anchor) {
+                parent.insertBefore(li, anchor);
+            } else {
+                parent.appendChild(li);
+            }
+        });
+    };
+
+    const updateUsageButtons = (summary) => {
+        if (!summary) {
+            return;
+        }
+        const status = summary.qmpstatus || (statusEl ? statusEl.textContent : '');
+        let usageCpu = summary.usage && typeof summary.usage.cpu === 'number' ? summary.usage.cpu : 0;
+        let usageMem = summary.usage && typeof summary.usage.mem === 'number' ? summary.usage.mem : 0;
+        if (['running', 'paused', 'suspended'].includes(status)) {
+            usageCpu = Math.max(0, usageCpu - (summary.cpu || 0));
+            if (summary.mem) {
+                usageMem = Math.max(0, usageMem - Math.floor(summary.mem / 1024));
+            }
+        }
+        if (changeCoresButton) {
+            changeCoresButton.dataset.usage = usageCpu;
+            changeCoresButton.disabled = false;
+        }
+        if (changeMemButton) {
+            changeMemButton.dataset.usage = usageMem;
+            changeMemButton.disabled = false;
+        }
+        if (summary.usage && typeof summary.usage.disk === 'number') {
+            usageDisk = summary.usage.disk;
+            container.dataset.usageDisk = usageDisk;
+            if (createDiskButton) {
+                createDiskButton.dataset.usage = usageDisk;
+            }
+        }
+    };
+
+    const updateStartButton = (summary) => {
+        if (!startButton) {
+            return;
+        }
+        if (!summary || !summary.usage_check) {
+            startButton.disabled = false;
+            if (startMessage) {
+                startMessage.classList.add('d-none');
+                startMessage.textContent = '';
+            }
+            return;
+        }
+        startButton.disabled = true;
+        const messageMap = {
+            exceeds_cpu_limit: 'Insufficient CPU resources to start VM.',
+            exceeds_memory_limit: 'Insufficient memory resources to start VM.',
+            exceeds_disk_limit: 'Insufficient disk resources to start VM.',
+        };
+        if (startMessage) {
+            startMessage.classList.remove('d-none');
+            startMessage.textContent = messageMap[summary.usage_check] || 'Insufficient resources to start VM.';
+        }
+    };
+
+    const updateActions = (summary) => {
+        const status = summary ? summary.qmpstatus : null;
+        if (actionsLoading) {
+            actionsLoading.classList.add('d-none');
+        }
+        [
+            startButton,
+            resumeButton,
+            consoleButton,
+            suspendButton,
+            hibernateButton,
+            shutdownButton,
+            stopButton,
+            resetButton,
+            deleteButton,
+        ].forEach((el) => setVisible(el, false));
+        setVisible(deleteHint, false);
+        if (!status) {
+            return;
+        }
+        if (status === 'stopped') {
+            setVisible(startButton, true);
+            setVisible(deleteButton, true);
+        } else if (status === 'running') {
+            setVisible(consoleButton, true);
+            setVisible(suspendButton, true);
+            setVisible(hibernateButton, true);
+            setVisible(shutdownButton, true);
+            setVisible(stopButton, true);
+            setVisible(resetButton, true);
+            setVisible(deleteHint, true);
+        } else if (status === 'paused' || status === 'suspended') {
+            setVisible(resumeButton, true);
+            setVisible(shutdownButton, true);
+            setVisible(stopButton, true);
+            setVisible(resetButton, true);
+            setVisible(deleteHint, true);
+        }
+        if (status !== 'stopped' && startMessage) {
+            startMessage.classList.add('d-none');
+        }
+    };
+
+    const updateSummary = (summary) => {
+        if (!summary) {
+            return;
+        }
+        if (nameEl) {
+            nameEl.textContent = summary.name || `VM ${vmid}`;
+        }
+        if (nodeEl) {
+            nodeEl.textContent = summary.node || 'Unknown';
+        }
+        if (cpuEl) {
+            cpuEl.textContent = summary.cpu ? summary.cpu : '—';
+        }
+        if (memEl) {
+            if (summary.mem) {
+                if (summary.mem < 1024) {
+                    memEl.textContent = `${summary.mem}MB`;
+                } else {
+                    memEl.textContent = `${Math.floor(summary.mem / 1024)}GB`;
+                }
+            } else {
+                memEl.textContent = '—';
+            }
+        }
+        if (summary.qmpstatus && statusEl) {
+            statusEl.textContent = summary.qmpstatus;
+        }
+        const vmName = summary.name || vmid;
+        document.querySelectorAll('[data-vmname]').forEach((el) => {
+            el.dataset.vmname = vmName;
+        });
+        updateUsageButtons(summary);
+        updateStartButton(summary);
+        updateActions(summary);
+    };
+
+    const fetchHardware = () => {
+        fetch(`/api/vm/${vmid}/hardware`, { credentials: 'same-origin' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('vm-hardware-fetch-failed');
+                }
+                return response.json();
+            })
+            .then((data) => {
+                const bootOrder = data.boot_order && Array.isArray(data.boot_order.order)
+                    ? data.boot_order.order
+                    : [];
+                const enabled = bootOrder
+                    .filter((entry) => entry.enabled !== false)
+                    .map((entry) => entry.device)
+                    .filter(Boolean);
+                if (bootText) {
+                    bootText.textContent = enabled.length ? enabled.join(', ') : 'None';
+                }
+                if (bootButton) {
+                    bootButton.dataset.boot_order = data.boot_order_json || '';
+                    $(bootButton).data('boot_order', data.boot_order || {});
+                    bootButton.disabled = false;
+                }
+
+                renderItems(data.interfaces || [], {
+                    loadingEl: interfacesLoading,
+                    emptyEl: interfacesEmpty,
+                    createButton: createNetButton,
+                    renderItem: (iface) => {
+                        const li = document.createElement('li');
+                        const label = `${iface.device || ''}: ${iface.ip || 'No IP'}`;
+                        li.appendChild(document.createTextNode(label + ' '));
+                        const btn = document.createElement('button');
+                        btn.className = 'btn btn-danger proxstar-vmbtn delete-net';
+                        btn.setAttribute('data-vmid', vmid);
+                        btn.setAttribute('data-interface', iface.device || '');
+                        btn.innerHTML = '<i class="fas fa-trash"></i>';
+                        li.appendChild(btn);
+                        return li;
+                    },
+                });
+
+                renderItems(data.disks || [], {
+                    loadingEl: disksLoading,
+                    emptyEl: disksEmpty,
+                    createButton: createDiskButton,
+                    renderItem: (disk) => {
+                        const li = document.createElement('li');
+                        const size = disk.size_gb || disk.size || '';
+                        li.appendChild(
+                            document.createTextNode(`${disk.device || ''}: ${size}GB `)
+                        );
+                        const resizeBtn = document.createElement('button');
+                        resizeBtn.className = 'btn btn-default proxstar-vmbtn resize-disk';
+                        resizeBtn.setAttribute('data-vmid', vmid);
+                        resizeBtn.setAttribute('data-disk', disk.device || '');
+                        resizeBtn.setAttribute('data-usage', usageDisk);
+                        resizeBtn.setAttribute('data-limit', limitDisk);
+                        resizeBtn.innerHTML = '<i class="fas fa-cog"></i>';
+                        li.appendChild(resizeBtn);
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'btn btn-danger proxstar-vmbtn delete-disk';
+                        deleteBtn.setAttribute('data-vmid', vmid);
+                        deleteBtn.setAttribute('data-disk', disk.device || '');
+                        deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                        li.appendChild(deleteBtn);
+                        return li;
+                    },
+                });
+
+                renderItems(data.isos || [], {
+                    loadingEl: isosLoading,
+                    emptyEl: isosEmpty,
+                    createButton: createIsoButton,
+                    renderItem: (iso) => {
+                        const li = document.createElement('li');
+                        const label = `${iso.device || ''}: ${iso.iso || 'None'}`;
+                        li.appendChild(document.createTextNode(label + ' '));
+                        const changeBtn = document.createElement('button');
+                        changeBtn.className = 'btn btn-default proxstar-vmbtn change-iso';
+                        changeBtn.setAttribute('data-vmid', vmid);
+                        changeBtn.setAttribute('data-iso', iso.device || '');
+                        changeBtn.innerHTML = '<i class="fas fa-cog"></i>';
+                        li.appendChild(changeBtn);
+                        if (iso.iso && iso.iso !== 'None') {
+                            const ejectBtn = document.createElement('button');
+                            ejectBtn.className = 'btn btn-warning proxstar-vmbtn eject-iso';
+                            ejectBtn.setAttribute('data-vmid', vmid);
+                            ejectBtn.setAttribute('data-iso', iso.device || '');
+                            ejectBtn.innerHTML = '<i class="fas fa-eject"></i>';
+                            li.appendChild(ejectBtn);
+                        }
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'btn btn-danger proxstar-vmbtn delete-iso';
+                        deleteBtn.setAttribute('data-vmid', vmid);
+                        deleteBtn.setAttribute('data-iso', iso.device || '');
+                        deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                        li.appendChild(deleteBtn);
+                        return li;
+                    },
+                });
+            })
+            .catch(() => {
+                if (bootText) {
+                    bootText.textContent = 'Failed to load';
+                }
+                if (interfacesLoading) {
+                    interfacesLoading.textContent = 'Failed to load interfaces';
+                }
+                if (disksLoading) {
+                    disksLoading.textContent = 'Failed to load disks';
+                }
+                if (isosLoading) {
+                    isosLoading.textContent = 'Failed to load ISOs';
+                }
+            });
+    };
+
+    const summaryRequest = fetch(`/api/vm/${vmid}/summary`, { credentials: 'same-origin' })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error('vm-summary-fetch-failed');
+            }
+            return response.json();
+        });
+    const hardwareRequest = fetch(`/api/vm/${vmid}/hardware`, { credentials: 'same-origin' })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error('vm-hardware-fetch-failed');
+            }
+            return response.json();
+        });
+    Promise.allSettled([summaryRequest, hardwareRequest]).then((results) => {
+        const [summaryResult, hardwareResult] = results;
+        if (summaryResult.status === 'fulfilled') {
+            updateSummary(summaryResult.value);
+        } else {
+            if (nameEl) {
+                nameEl.textContent = `VM ${vmid}`;
+            }
+            if (nodeEl) {
+                nodeEl.textContent = 'Unknown';
+            }
+            if (cpuEl) {
+                cpuEl.textContent = '—';
+            }
+            if (memEl) {
+                memEl.textContent = '—';
+            }
+            if (statusEl) {
+                statusEl.textContent = 'Unavailable';
+            }
+            updateStartButton({});
+            updateActions({});
+        }
+        if (hardwareResult.status === 'fulfilled') {
+            const data = hardwareResult.value;
+            const bootOrder = data.boot_order && Array.isArray(data.boot_order.order)
+                ? data.boot_order.order
+                : [];
+            const enabled = bootOrder
+                .filter((entry) => entry.enabled !== false)
+                .map((entry) => entry.device)
+                .filter(Boolean);
+            if (bootText) {
+                bootText.textContent = enabled.length ? enabled.join(', ') : 'None';
+            }
+            if (bootButton) {
+                bootButton.dataset.boot_order = data.boot_order_json || '';
+                $(bootButton).data('boot_order', data.boot_order || {});
+                bootButton.disabled = false;
+            }
+
+            renderItems(data.interfaces || [], {
+                loadingEl: interfacesLoading,
+                emptyEl: interfacesEmpty,
+                createButton: createNetButton,
+                renderItem: (iface) => {
+                    const li = document.createElement('li');
+                    const label = `${iface.device || ''}: ${iface.ip || 'No IP'}`;
+                    li.appendChild(document.createTextNode(label + ' '));
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-danger proxstar-vmbtn delete-net';
+                    btn.setAttribute('data-vmid', vmid);
+                    btn.setAttribute('data-interface', iface.device || '');
+                    btn.innerHTML = '<i class="fas fa-trash"></i>';
+                    li.appendChild(btn);
+                    return li;
+                },
+            });
+
+            renderItems(data.disks || [], {
+                loadingEl: disksLoading,
+                emptyEl: disksEmpty,
+                createButton: createDiskButton,
+                renderItem: (disk) => {
+                    const li = document.createElement('li');
+                    const size = disk.size_gb || disk.size || '';
+                    li.appendChild(
+                        document.createTextNode(`${disk.device || ''}: ${size}GB `)
+                    );
+                    const resizeBtn = document.createElement('button');
+                    resizeBtn.className = 'btn btn-default proxstar-vmbtn resize-disk';
+                    resizeBtn.setAttribute('data-vmid', vmid);
+                    resizeBtn.setAttribute('data-disk', disk.device || '');
+                    resizeBtn.setAttribute('data-usage', usageDisk);
+                    resizeBtn.setAttribute('data-limit', limitDisk);
+                    resizeBtn.innerHTML = '<i class="fas fa-cog"></i>';
+                    li.appendChild(resizeBtn);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'btn btn-danger proxstar-vmbtn delete-disk';
+                    deleteBtn.setAttribute('data-vmid', vmid);
+                    deleteBtn.setAttribute('data-disk', disk.device || '');
+                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                    li.appendChild(deleteBtn);
+                    return li;
+                },
+            });
+
+            renderItems(data.isos || [], {
+                loadingEl: isosLoading,
+                emptyEl: isosEmpty,
+                createButton: createIsoButton,
+                renderItem: (iso) => {
+                    const li = document.createElement('li');
+                    const label = `${iso.device || ''}: ${iso.iso || 'None'}`;
+                    li.appendChild(document.createTextNode(label + ' '));
+                    const changeBtn = document.createElement('button');
+                    changeBtn.className = 'btn btn-default proxstar-vmbtn change-iso';
+                    changeBtn.setAttribute('data-vmid', vmid);
+                    changeBtn.setAttribute('data-iso', iso.device || '');
+                    changeBtn.innerHTML = '<i class="fas fa-cog"></i>';
+                    li.appendChild(changeBtn);
+                    if (iso.iso && iso.iso !== 'None') {
+                        const ejectBtn = document.createElement('button');
+                        ejectBtn.className = 'btn btn-warning proxstar-vmbtn eject-iso';
+                        ejectBtn.setAttribute('data-vmid', vmid);
+                        ejectBtn.setAttribute('data-iso', iso.device || '');
+                        ejectBtn.innerHTML = '<i class="fas fa-eject"></i>';
+                        li.appendChild(ejectBtn);
+                    }
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'btn btn-danger proxstar-vmbtn delete-iso';
+                    deleteBtn.setAttribute('data-vmid', vmid);
+                    deleteBtn.setAttribute('data-iso', iso.device || '');
+                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                    li.appendChild(deleteBtn);
+                    return li;
+                },
+            });
+        } else {
+            if (bootText) {
+                bootText.textContent = 'Failed to load';
+            }
+            if (interfacesLoading) {
+                interfacesLoading.textContent = 'Failed to load interfaces';
+            }
+            if (disksLoading) {
+                disksLoading.textContent = 'Failed to load disks';
+            }
+            if (isosLoading) {
+                isosLoading.textContent = 'Failed to load ISOs';
+            }
+        }
+    });
+}
+
 function confirmDialog(url, confirm, confirmButton, complete, error, location, danger) {
     swal({
         title: confirm,
@@ -328,9 +875,7 @@ function confirmDialog(url, confirm, confirmButton, complete, error, location, d
                 credentials: 'same-origin',
                 method: 'post'
             }).then((response) => {
-                return swal(complete, {
-                    icon: "success",
-                });
+                return autoCloseAlert(complete);
             }).then(() => {
                 window.location = location;
             }).catch(err => {
@@ -342,6 +887,15 @@ function confirmDialog(url, confirm, confirmButton, complete, error, location, d
                 }
             });
         }
+    });
+}
+
+function autoCloseAlert(message, icon = "success") {
+    return swal({
+        text: message,
+        icon: icon,
+        buttons: false,
+        timer: 2500,
     });
 }
 
@@ -372,12 +926,25 @@ $("#shutdown-vm").click(function(){
 $("#suspend-vm").click(function(){
     const vmname = $(this).data('vmname');
     const vmid = $(this).data('vmid')
-    confirmDialog(`/vm/${vmid}/power/suspend`, `Are you sure you want to suspend ${vmname}?`, "Suspend", `${vmname} is now suspending!`, `Unable to suspend ${vmname}. Please try again later.`, `/vm/${vmid}`, true)
+    confirmDialog(`/vm/${vmid}/power/pause`, `Are you sure you want to pause ${vmname}?`, "Pause", `${vmname} is now pausing!`, `Unable to pause ${vmname}. Please try again later.`, `/vm/${vmid}`, true)
+});
+
+$("#hibernate-vm").click(function(){
+    const vmname = $(this).data('vmname');
+    const vmid = $(this).data('vmid')
+    confirmDialog(`/vm/${vmid}/power/suspend`, `Are you sure you want to hibernate ${vmname}?`, "Hibernate", `${vmname} is now hibernating!`, `Unable to hibernate ${vmname}. Please try again later.`, `/vm/${vmid}`, true)
 });
 
 $("#start-vm").click(function(){
     const vmname = $(this).data('vmname');
     const vmid = $(this).data('vmid');
+    swal({
+        title: `Starting ${vmname}...`,
+        text: 'Please wait.',
+        buttons: false,
+        closeOnClickOutside: false,
+        closeOnEsc: false,
+    });
     fetch(`/vm/${vmid}/power/start`, {
         credentials: 'same-origin',
         method: 'post'
@@ -389,13 +956,13 @@ $("#start-vm").click(function(){
             }
             throw new Error('start_failed');
         }
-        return swal(`${vmname} is now starting!`, {
-            icon: "success",
-        });
+        swal.close();
+        return autoCloseAlert(`${vmname} starting...`);
     }).then(() => {
         window.location = `/vm/${vmid}`;
     }).catch(err => {
         if (err) {
+            swal.close();
             if (err.message === 'expired') {
                 swal("Expired VM", `${vmname} is expired and cannot be started.`, "error");
             } else {
@@ -411,22 +978,35 @@ $("#start-vm").click(function(){
 $("#resume-vm").click(function(){
     const vmname = $(this).data('vmname');
     const vmid = $(this).data('vmid');
-    fetch(`/vm/${vmid}/power/resume`, {
-        credentials: 'same-origin',
-        method: 'post'
-    }).then(async (response) => {
-        if (!response.ok) {
-            const text = await response.text();
-            if (text === 'expired') {
-                throw new Error('expired');
+    swal({
+        title: `Resume ${vmname}?`,
+        icon: "warning",
+        buttons: {
+            cancel: true,
+            confirm: {
+                text: "Resume",
+                closeModal: false,
             }
-            throw new Error('resume_failed');
+        },
+    }).then((willResume) => {
+        if (!willResume) {
+            return null;
         }
-        return swal(`${vmname} is now resuming!`, {
-            icon: "success",
+        return fetch(`/vm/${vmid}/power/resume`, {
+            credentials: 'same-origin',
+            method: 'post'
+        }).then(async (response) => {
+            if (!response.ok) {
+                const text = await response.text();
+                if (text === 'expired') {
+                    throw new Error('expired');
+                }
+                throw new Error('resume_failed');
+            }
+            return autoCloseAlert(`${vmname} resuming...`);
+        }).then(() => {
+            window.location = `/vm/${vmid}`;
         });
-    }).then(() => {
-        window.location = `/vm/${vmid}`;
     }).catch(err => {
         if (err) {
             if (err.message === 'expired') {
@@ -441,14 +1021,14 @@ $("#resume-vm").click(function(){
     });
 });
 
-$(".eject-iso").click(function(){
+$(document).on('click', '.eject-iso', function(){
     const iso = $(this).data('iso');
     const vmid = $(this).data('vmid');
     confirmDialog(`/vm/${vmid}/iso/${iso}/eject`, `Are you sure you want to eject this ISO?`, "Eject", `Ejecting ISO!`, `Unable to eject ISO. Please try again later.`, `/vm/${vmid}`, true)
 });
 
 
-$(".change-iso").click(function(){
+$(document).on('click', '.change-iso', function(){
     fetch(`/isos`, {
         credentials: 'same-origin',
     }).then((response) => {
@@ -484,16 +1064,7 @@ $(".change-iso").click(function(){
                     credentials: 'same-origin',
                     method: 'post'
                 }).then((response) => {
-                    return swal(`${iso} is now being mounted!`, {
-                        icon: "success",
-                        buttons: {
-                            ok: {
-                                text: "OK",
-                                closeModal: true,
-                                className: "",
-                            }
-                        }
-                    });
+                    return autoCloseAlert(`${iso} mounting...`);
                 }).then(() => {
                     window.location = `/vm/${vmid}`;
                 }).catch(err => {
@@ -543,11 +1114,11 @@ $("#create-vm").click(function(){
             if (template != 'none' && ssh_key && !ssh_regex.test(ssh_key)) {
                 swal("Uh oh...", "Invalid SSH key!", "error");
             } else if (disk > max_disk) {
-                swal("Uh oh...", `You do not have enough disk resources available! Please lower the VM disk size to ${max_disk}GB or lower.`, "error");
+                swal("Uh oh...", `Not enough disk resources. Please lower the VM disk size to ${max_disk}GB or lower.`, "error");
             } else if (cores > max_cpu) {
-                swal("Uh oh...", `You do not have enough CPU resources available! Please lower the VM cores to ${max_cpu} or lower.`, "error");
+                swal("Uh oh...", `Not enough CPU resources. Lower the VM cores to ≤${max_cpu} or shut down other VMs.`, "error");
             } else if (mem/1024 > max_mem) {
-                swal("Uh oh...", `You do not have enough memory resources available! Please lower the VM memory to ${max_mem}GB or lower.`, "error");
+                swal("Uh oh...", `Not enough memory resources. Lower the VM memory to ≤${max_mem}GB or shut down other VMs.`, "error");
             } else {
                 fetch(`/hostname/${name}`, {
                     credentials: 'same-origin',
@@ -596,20 +1167,11 @@ $("#create-vm").click(function(){
                                     body: data
                                 }).then((response) => {
                                     if (template == 'none') {
-                                        var swal_text = `${name} is now being created. Check back soon and it should be good to go.`
+                                        var swal_text = `${name} is now being created. It should be good to go soon.`
                                     } else {
-                                        var swal_text = `${name} is now being created. Check back soon and it should be good to go. The SSH credentials are your CSH username for the user and the SSH key you provided.`
+                                        var swal_text = `${name} is now being created. It will be running in a few seconds.`
                                     }
-                                    return swal(`${swal_text}`, {
-                                        icon: "success",
-                                        buttons: {
-                                            ok: {
-                                                text: "OK",
-                                                closeModal: true,
-                                                className: "",
-                                            }
-                                        }
-                                    });
+                                    return autoCloseAlert(`${swal_text}`);
                                 }).then(() => {
                                     window.location = "/";
                                 });
@@ -646,7 +1208,7 @@ $("#create-pool").click(function(){
     const members = document.getElementById('members').value;
     var info = document.createElement('span');
     swal({
-        title: `Are you sure you want to create ${name}?`,
+        title: `Are you sure you want to create "${name}"?`,
         content: info,
         icon: "info",
         buttons: {
@@ -669,17 +1231,8 @@ $("#create-pool").click(function(){
                 body: data
             }).then((response) => {
                 console.log(response);
-                var swal_text = `${name} is now being created. Check back soon and it should be good to go.`
-                return swal(`${swal_text}`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                            className: "",
-                        }
-                    }
-                });
+                var swal_text = `"${name}" is now being created. It should be good to go soon.`
+                return autoCloseAlert(`${swal_text}`);
             }).then(() => {
                 window.location = "/";
             });
@@ -719,16 +1272,7 @@ $("#change-cores").click(function(){
                 credentials: 'same-origin',
                 method: 'post'
             }).then((response) => {
-                return swal(`Now applying the change to the number of cores!`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                            className: "",
-                        }
-                    }
-                });
+                return autoCloseAlert(`Now applying the change to the number of cores!`);
             }).then(() => {
                 window.location = `/vm/${vmid}`;
             });
@@ -775,16 +1319,7 @@ $("#change-mem").click(function(){
                 credentials: 'same-origin',
                 method: 'post'
             }).then((response) => {
-                return swal(`Now applying the change to the amount of memory!`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                            className: "",
-                        }
-                    }
-                });
+                return autoCloseAlert(`Now applying the change to the amount of memory!`);
             }).then(() => {
                 window.location = `/vm/${vmid}`;
             });
@@ -853,16 +1388,7 @@ $(".edit-limit").click(function(){
                 method: 'post',
                 body: data
             }).then((response) => {
-                return swal(`Now applying the new limits to ${user}!`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                            className: "",
-                        }
-                    }
-                });
+                return autoCloseAlert(`Now applying the new limits to ${user}!`);
             }).then(() => {
                 window.location = "/";
             });
@@ -914,16 +1440,7 @@ $(".edit-shared-members").click(function(){
                 method: 'post',
                 body: data
             }).then((response) => {
-                return swal(`Now applying new member list to ${pool}!`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                            className: "",
-                        }
-                    }
-                });
+                return autoCloseAlert(`Now applying new member list to ${pool}!`);
             }).then(() => {
                 window.location = "/";
             });
@@ -959,9 +1476,7 @@ $(".delete-user").click(function(){
                 credentials: 'same-origin',
                 method: 'post'
             }).then((response) => {
-                return swal(`The pool for ${user} has been deleted!`, {
-                    icon: "success",
-                });
+                return autoCloseAlert(`The pool for ${user} has been deleted!`);
             }).then(() => {
                 window.location = "/";
             }).catch(err => {
@@ -997,9 +1512,7 @@ $(".delete-pool").click(function(){
                 credentials: 'same-origin',
                 method: 'post'
             }).then((response) => {
-                return swal(`The pool ${pool} has been deleted!`, {
-                    icon: "success",
-                });
+                return autoCloseAlert(`The pool ${pool} has been deleted!`);
             }).then(() => {
                 window.location = "/";
             }).catch(err => {
@@ -1051,6 +1564,9 @@ function change_for_template(obj) {
 }
 
 $(document).on('click', '#console-vm', function(){
+    if (this.tagName && this.tagName.toLowerCase() === 'a') {
+        return;
+    }
     const vmname = $(this).data('vmname');
     const vmid = $(this).data('vmid');
     if (!vmid) {
@@ -1106,9 +1622,7 @@ $("#expire-all-sessions").click(function(){
                 return response.json();
             }).then((data) => {
                 const count = data && typeof data.expired === 'number' ? data.expired : 0;
-                swal(`Expired ${count} sessions.`, {
-                    icon: "success",
-                });
+                autoCloseAlert(`Expired ${count} sessions.`);
             }).catch(() => {
                 swal("Uh oh...", "Unable to expire sessions. Please try again later.", "error");
             });
@@ -1116,7 +1630,7 @@ $("#expire-all-sessions").click(function(){
     });
 });
 
-$(".resize-disk").click(function(){
+$(document).on('click', '.resize-disk', function(){
     const vmid = $(this).data('vmid');
     const disk = $(this).data('disk');
     const usage = $(this).data('usage');
@@ -1150,16 +1664,7 @@ $(".resize-disk").click(function(){
                     credentials: 'same-origin',
                     method: 'post'
                 }).then((response) => {
-                    return swal(`Disk size has been increased!`, {
-                        icon: "success",
-                        buttons: {
-                            ok: {
-                                text: "OK",
-                                closeModal: true,
-                                className: "",
-                            }
-                        }
-                    });
+                    return autoCloseAlert(`Disk size has been increased!`);
                 }).then(() => {
                     window.location = `/vm/${vmid}`;
                 });
@@ -1221,16 +1726,7 @@ $(".edit-template").click(function(){
                 method: 'post',
                 body: data
             }).then((response) => {
-                return swal(`Template info changed!`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                            className: "",
-                        }
-                    }
-                });
+                return autoCloseAlert(`Template info changed!`);
             }).then(() => {
                 location.reload();
             });
@@ -1286,15 +1782,7 @@ $("#edit-boot-order").click(function(){
                 method: 'post',
                 body: data
             }).then((response) => {
-                return swal(`Now applying the new boot order to ${vmname}!`, {
-                    icon: "success",
-                    buttons: {
-                        ok: {
-                            text: "OK",
-                            closeModal: true,
-                        }
-                    }
-                });
+                return autoCloseAlert(`Now applying the new boot order to ${vmname}!`);
             }).then(() => {
                 window.location = `/vm/${vmid}`;
             });
@@ -1401,7 +1889,7 @@ $("#create-net").click(function(){
     confirmDialog(`/vm/${vmid}/net/create`, `Are you sure you want to create a new interface?`, "Create", `Creating new interface!`, `Unable to create interface. Please try again later.`, `/vm/${vmid}`, false)
 });
 
-$(".delete-net").click(function(){
+$(document).on('click', '.delete-net', function(){
     const vmid = $(this).data('vmid')
     const interface = $(this).data('interface')
     confirmDialog(`/vm/${vmid}/net/${interface}/delete`, `Are you sure you want to delete ${interface}?`, "Delete", `Deleting ${interface}!`, `Unable to delete interface. Please try again later.`, `/vm/${vmid}`, true)
@@ -1412,7 +1900,7 @@ $("#create-iso").click(function(){
     confirmDialog(`/vm/${vmid}/iso/create`, `Are you sure you want to create a new ISO drive?`, "Create", `Creating new ISO drive!`, `Unable to create ISO drive. Please try again later.`, `/vm/${vmid}`, false)
 });
 
-$(".delete-iso").click(function(){
+$(document).on('click', '.delete-iso', function(){
     const vmid = $(this).data('vmid')
     const iso = $(this).data('iso')
     confirmDialog(`/vm/${vmid}/iso/${iso}/delete`, `Are you sure you want to delete ${iso}?`, "Delete", `Deleting ${iso}!`, `Unable to delete ISO drive. Please try again later.`, `/vm/${vmid}`, true)
@@ -1452,16 +1940,7 @@ $("#create-disk").click(function(){
                     credentials: 'same-origin',
                     method: 'post'
                 }).then((response) => {
-                    return swal(`Disk has been created!`, {
-                        icon: "success",
-                        buttons: {
-                            ok: {
-                                text: "OK",
-                                closeModal: true,
-                                className: "",
-                            }
-                        }
-                    });
+                    return autoCloseAlert(`Disk has been created!`);
                 }).then(() => {
                     window.location = `/vm/${vmid}`;
                 });
@@ -1479,7 +1958,7 @@ $("#create-disk").click(function(){
     });
 });
 
-$(".delete-disk").click(function(){
+$(document).on('click', '.delete-disk', function(){
     const vmid = $(this).data('vmid')
     const disk = $(this).data('disk')
     confirmDialog(`/vm/${vmid}/disk/${disk}/delete`, `Are you sure you want to delete ${disk}?`, "Delete", `Deleting ${disk}!`, `Unable to delete disk. Please try again later.`, `/vm/${vmid}`, true)

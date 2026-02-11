@@ -6,6 +6,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN curl -fsSL https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz -o novnc.tar.gz
 COPY start_worker.sh start_scheduler.sh .
+COPY LICENSE.txt ./
 COPY .git .git/
 COPY *.py .
 COPY proxstar ./proxstar

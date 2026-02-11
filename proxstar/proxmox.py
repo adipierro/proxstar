@@ -33,6 +33,7 @@ def attempt_proxmox_connection(host):
         user=app.config['PROXMOX_USER'],
         token_name=app.config['PROXMOX_TOKEN_NAME'],
         token_value=app.config['PROXMOX_TOKEN_VALUE'],
+        timeout=app.config.get('PROXMOX_TIMEOUT', 10),
         verify_ssl=False,
     )
     proxmox.version.get()

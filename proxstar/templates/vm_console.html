@@ -2,30 +2,22 @@
 {% block body %}
 
 <div class="container-fluid px-4" id="vm-console" data-vmid="{{ vmid }}">
-    <div class="row" id="session-timer" data-force-show="true" style="display: none;">
-        <div class="col-md-12 col-sm-12">
-            <div class="card bg-light mb-3">
-                <div class="card-body text-center">
-                    <strong>Session time remaining:</strong>
+    <div class="row">
+        <div class="col-12">
+            <div class="console-toolbar">
+                <div id="session-timer" data-force-show="true" style="display: none;">
+                    <strong>Session:</strong>
                     <span id="session-timer-remaining">--:--:--</span>
                     <span id="session-timer-meta"></span>
                 </div>
-            </div>
-        </div>
-    </div>
-    <div class="row">
-        <div class="col-12">
-            <div class="card bg-light mb-3">
-                <div class="card-body text-center">
-                    <p id="console-status">Connecting to console...</p>
-                    <div class="d-flex justify-content-center gap-2 mt-2">
-                        <button class="btn btn-primary btn-sm" id="console-reconnect" type="button">
-                            Reconnect Console
-                        </button>
-                        <button class="btn btn-secondary btn-sm" id="console-fullscreen" type="button">
-                            Fullscreen
-                        </button>
-                    </div>
+                <div id="console-status">Connecting to console...</div>
+                <div class="btn-group" role="group" aria-label="Console controls">
+                    <button class="btn btn-primary btn-sm" id="console-reconnect" type="button">
+                        Reconnect
+                    </button>
+                    <button class="btn btn-secondary btn-sm" id="console-fullscreen" type="button">
+                        Fullscreen
+                    </button>
                 </div>
             </div>
             <div class="card bg-light mb-3">

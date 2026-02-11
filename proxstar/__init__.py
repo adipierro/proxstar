@@ -527,24 +527,88 @@ def hostname(name):
     return 'ok'
 
 
+@app.route('/license')
+@auth.oidc_auth('default')
+def license_page():
+    user = User(flask_session['userinfo']['preferred_username'])
+    root_dir = app.config.get('ROOT_DIR', os.getcwd())
+    license_path = os.path.abspath(os.path.join(root_dir, 'LICENSE.txt'))
+    try:
+        with open(license_path, 'r', encoding='utf-8') as handle:
+            license_text = handle.read()
+    except OSError as exc:
+        logging.error('Failed to read license file: %s', exc)
+        license_text = 'License file unavailable.'
+    return render_template('license.html', user=user, license_text=license_text)
+
+
 @app.route('/vm/<string:vmid>')
 @auth.oidc_auth('default')
 def vm_details(vmid):
     user = User(flask_session['userinfo']['preferred_username'])
-    connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
-        vm = _get_vm_or_404(vmid)
-        usage_check = user.check_usage(vm.cpu, vm.mem, 0)
+        vm = VM(vmid)
         return render_template(
             'vm_details.html',
             user=user,
             vm=vm,
-            usage=user.usage,
             limits=user.limits,
-            usage_check=usage_check,
         )
     else:
         return abort(403)
+
+
+@app.route('/api/vm/<string:vmid>/hardware')
+@auth.oidc_auth('default')
+def vm_hardware(vmid):
+    user = User(flask_session['userinfo']['preferred_username'])
+    connect_proxmox()
+    if user.rtp or int(vmid) in user.allowed_vms:
+        vm = _get_vm_or_404(vmid)
+        interfaces = [
+            {'device': iface[0], 'mac': iface[1], 'ip': iface[2]} for iface in vm.interfaces
+        ]
+        disks = [{'device': disk[0], 'size_gb': disk[1]} for disk in vm.disks]
+        isos = [{'device': iso[0], 'iso': iso[1]} for iso in vm.isos]
+        return jsonify(
+            {
+                'interfaces': interfaces,
+                'disks': disks,
+                'isos': isos,
+                'boot_order': vm.boot_order,
+                'boot_order_json': vm.boot_order_json,
+            }
+        )
+    return abort(403)
+
+
+@app.route('/api/vm/<string:vmid>/summary')
+@auth.oidc_auth('default')
+def vm_summary(vmid):
+    user = User(flask_session['userinfo']['preferred_username'])
+    connect_proxmox()
+    if user.rtp or int(vmid) in user.allowed_vms:
+        vm = _get_vm_or_404(vmid)
+        cpu = vm.cpu
+        mem = vm.mem
+        usage = user.usage
+        limits = user.limits
+        usage_check = None
+        if not user.rtp:
+            usage_check = user.check_usage(cpu, mem, 0)
+        return jsonify(
+            {
+                'name': vm.name,
+                'node': vm.node,
+                'qmpstatus': vm.qmpstatus,
+                'cpu': cpu,
+                'mem': mem,
+                'usage': usage,
+                'limits': limits,
+                'usage_check': usage_check,
+            }
+        )
+    return abort(403)
 
 
 @app.route('/vm/<string:vmid>/power/<string:action>', methods=['POST'])
@@ -579,21 +643,39 @@ def vm_power(vmid, action):
         elif action == 'stop':
             vm.stop()
             if vnc_token is not None:
-                delete_vnc_target(token=vnc_token)
+                try:
+                    delete_vnc_target(token=vnc_token)
+                except LookupError:
+                    logging.info('VNC token %s not found during stop; skipping cleanup.', vnc_token)
                 redis_conn.delete(vnc_token_key)
             _clear_session_if_idle(user)
         elif action == 'shutdown':
             vm.shutdown()
             if vnc_token is not None:
-                delete_vnc_target(token=vnc_token)
+                try:
+                    delete_vnc_target(token=vnc_token)
+                except LookupError:
+                    logging.info('VNC token %s not found during shutdown; skipping cleanup.', vnc_token)
                 redis_conn.delete(vnc_token_key)
             _clear_session_if_idle(user)
         elif action == 'reset':
             vm.reset()
         elif action == 'suspend':
+            vm.suspend(todisk=True)
+            if vnc_token is not None:
+                try:
+                    delete_vnc_target(token=vnc_token)
+                except LookupError:
+                    logging.info('VNC token %s not found during suspend; skipping cleanup.', vnc_token)
+                redis_conn.delete(vnc_token_key)
+            _clear_session_if_idle(user)
+        elif action == 'pause':
             vm.suspend()
             if vnc_token is not None:
-                delete_vnc_target(token=vnc_token)
+                try:
+                    delete_vnc_target(token=vnc_token)
+                except LookupError:
+                    logging.info('VNC token %s not found during pause; skipping cleanup.', vnc_token)
                 redis_conn.delete(vnc_token_key)
             _clear_session_if_idle(user)
         elif action == 'resume':
@@ -639,7 +721,7 @@ def console_page(vmid):
     connect_proxmox()
     if user.rtp or int(vmid) in user.allowed_vms:
         return render_template('vm_console.html', user=user, vmid=vmid)
-    return '', 403
+    abort(403)
 
 
 @app.route('/vm/<string:vmid>/cpu/<int:cores>', methods=['POST'])
