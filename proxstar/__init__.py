@@ -668,8 +668,10 @@ def vm_power(vmid, action):
         # For deleting the token from redis later
         vnc_token = None
         try:
-            vnc_token = redis_conn.get(vnc_token_key).decode('utf-8')
-        except AttributeError as e:
+            token_value = redis_conn.get(vnc_token_key)
+            if token_value is not None:
+                vnc_token = token_value.decode('utf-8')
+        except Exception as e:
             logging.warning(
                 'Could not get vnc_token during %s: %s. Action is still being performed.',
                 action,

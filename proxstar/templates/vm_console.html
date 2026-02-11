@@ -18,8 +18,30 @@
                     </div>
                 </div>
                 <div class="btn-group" role="group" aria-label="Console controls">
-                    <button class="btn btn-success btn-sm d-none" id="console-start-vm" type="button">Start VM</button>
-                    <button class="btn btn-success btn-sm d-none" id="console-resume-vm" type="button">Resume VM</button>
+                    <div class="console-power-slot">
+                        <button class="btn btn-success btn-sm d-none console-power-btn" id="console-start-vm" type="button" aria-label="Start VM" title="Start VM" data-toggle="tooltip">
+                            <i class="fas fa-power-off" aria-hidden="true"></i>
+                            <span class="sr-only">Start VM</span>
+                        </button>
+                        <button class="btn btn-success btn-sm d-none console-power-btn" id="console-resume-vm" type="button" aria-label="Resume VM" title="Resume VM" data-toggle="tooltip">
+                            <i class="fas fa-play" aria-hidden="true"></i>
+                            <span class="sr-only">Resume VM</span>
+                        </button>
+                        <div class="btn-group console-power-menu" id="console-power-menu" role="group">
+                            <button class="btn btn-outline-danger btn-sm console-power-menu-toggle dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" aria-label="Power actions" title="Power actions">
+                                <i class="fas fa-bolt" aria-hidden="true"></i>
+                                <span class="sr-only">Power actions</span>
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-right">
+                                <button class="dropdown-item" type="button" data-console-action="shutdown">Shutdown</button>
+                                <button class="dropdown-item" type="button" data-console-action="stop">Stop (hard)</button>
+                                <button class="dropdown-item" type="button" data-console-action="reset">Reset</button>
+                                <div class="dropdown-divider"></div>
+                                <button class="dropdown-item" type="button" data-console-action="pause">Pause</button>
+                                <button class="dropdown-item" type="button" data-console-action="suspend">Hibernate</button>
+                            </div>
+                        </div>
+                    </div>
                     <button class="btn btn-primary btn-sm" id="console-reconnect" type="button">
                         Reconnect
                     </button>

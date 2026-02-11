@@ -193,6 +193,8 @@ table, th, td {
 }
 
 .console-toolbar {
+    position: relative;
+    z-index: 10;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -234,6 +236,89 @@ table, th, td {
 #console-vm-actions {
     display: flex;
     gap: 0.5rem;
+}
+
+.console-power-slot {
+    position: relative;
+    display: inline-grid;
+    align-items: stretch;
+    justify-items: stretch;
+    width: 42px;
+    margin-right: -1px;
+}
+
+.console-power-slot > .console-power-btn,
+.console-power-slot > .console-power-menu {
+    grid-area: 1 / 1;
+}
+
+.console-power-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    padding: 0.25rem 0.5rem;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    border-radius: 0.2rem 0 0 0.2rem !important;
+    width: 100%;
+}
+
+.console-power-menu .dropdown-menu {
+    min-width: 170px;
+    z-index: 1055;
+}
+
+.console-power-menu {
+    opacity: 0;
+    transform: translateX(-8px);
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    z-index: 20;
+    pointer-events: none;
+}
+
+.console-power-menu.is-visible {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+
+.console-power-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    padding: 0.25rem 0.5rem;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    border-radius: 0.2rem 0 0 0.2rem !important;
+    width: 100%;
+}
+
+.console-toolbar .btn-group > .console-power-slot + .btn {
+    border-top-left-radius: 0 !important;
+    border-bottom-left-radius: 0 !important;
+    margin-left: -1px;
+}
+
+.console-power-slot .console-power-menu-toggle {
+    border-radius: 0.2rem 0 0 0.2rem !important;
+}
+
+.console-power-menu-toggle i {
+    margin: 0;
+}
+
+.console-power-btn i {
+    margin: 0;
+}
+
+.console-power-btn.slide-in {
+    transform: translateX(-8px);
+    opacity: 0;
+}
+
+.console-power-btn.slide-out {
+    transform: translateX(10px);
+    opacity: 0;
 }
 
 .console-screen {

@@ -75,6 +75,7 @@ function initSessionTimer() {
             }
         });
     };
+    window.proxstarRefreshSessionTimer = fetchSession;
     fetchSession();
     setInterval(tick, 1000);
     setInterval(fetchSession, 30000);
@@ -202,13 +203,14 @@ function initVmConsole() {
         return;
     }
     const statusEl = document.getElementById('console-status-text');
-    const statusIcon = document.getElementById('console-status-icon');
+    const getStatusIcon = () => document.getElementById('console-status-icon');
     const screen = document.getElementById('console-screen');
     const overlayText = document.getElementById('console-overlay-text');
     const overlay = document.getElementById('console-overlay');
-    const overlayIcon = document.getElementById('console-overlay-icon');
+    const getOverlayIcon = () => document.getElementById('console-overlay-icon');
     const startButton = document.getElementById('console-start-vm');
     const resumeButton = document.getElementById('console-resume-vm');
+    const powerMenu = document.getElementById('console-power-menu');
     const lowBandwidthToggle = document.getElementById('console-low-bandwidth');
     const scaleToggle = document.getElementById('console-scale');
     const dotCursorToggle = document.getElementById('console-dot-cursor');
@@ -297,11 +299,26 @@ function initVmConsole() {
         document.title = `${label} Console | Proxstar`;
     };
     const showStatusWarning = (show) => {
+        const statusIcon = getStatusIcon();
         if (!statusIcon) {
             return;
         }
         statusIcon.classList.toggle('d-none', !show);
         statusIcon.style.display = show ? 'inline-flex' : 'none';
+    };
+    const clearOverlayStatic = () => {
+        if (!overlay) {
+            return;
+        }
+        overlay.classList.remove('console-overlay-static');
+        const spinner = overlay.querySelector('.spinner-border');
+        if (spinner) {
+            spinner.classList.remove('d-none');
+        }
+        const icon = getOverlayIcon();
+        if (icon) {
+            icon.classList.add('d-none');
+        }
     };
     const setConsoleState = (state, message) => {
         if (!screen) {
@@ -318,11 +335,14 @@ function initVmConsole() {
         if (overlayText && message) {
             overlayText.textContent = message;
         }
-        if (overlay) {
-            if (state === 'connected') {
-                overlay.classList.remove('console-overlay-static');
-                overlay.querySelector('.spinner-border')?.classList.remove('d-none');
-            }
+        if (state === 'connected') {
+            clearOverlayStatic();
+        }
+    };
+    const setOverlayLoading = (message) => {
+        clearOverlayStatic();
+        if (overlayText && message) {
+            overlayText.textContent = message;
         }
     };
     const setOverlayStatic = (message, showIcon = false) => {
@@ -337,24 +357,91 @@ function initVmConsole() {
         if (overlayText && message) {
             overlayText.textContent = message;
         }
-        if (overlayIcon) {
-            overlayIcon.classList.toggle('d-none', !showIcon);
+        const icon = getOverlayIcon();
+        if (icon) {
+            icon.classList.toggle('d-none', !showIcon);
         }
+    };
+    const showPowerMenu = (show, animate = false) => {
+        if (!powerMenu) {
+            return;
+        }
+        if (show) {
+            if (animate) {
+                powerMenu.classList.remove('is-visible');
+                requestAnimationFrame(() => {
+                    powerMenu.classList.add('is-visible');
+                });
+            } else {
+                powerMenu.classList.add('is-visible');
+            }
+            return;
+        }
+        powerMenu.classList.remove('is-visible');
     };
     const showVmActions = (mode) => {
         if (!startButton || !resumeButton) {
             return;
         }
+        const showButton = (button) => {
+            if (!button) {
+                return;
+            }
+            const wasHidden = button.classList.contains('d-none');
+            button.classList.remove('d-none');
+            button.classList.remove('slide-out');
+            if (wasHidden) {
+                button.classList.add('slide-in');
+                requestAnimationFrame(() => {
+                    button.classList.remove('slide-in');
+                });
+            }
+        };
+        const hideButton = (button) => {
+            if (!button) {
+                return;
+            }
+            button.classList.add('d-none');
+            button.classList.remove('slide-in');
+            button.classList.remove('slide-out');
+        };
+        showPowerMenu(false, true);
         if (mode === 'start') {
-            startButton.classList.remove('d-none');
-            resumeButton.classList.add('d-none');
+            showButton(startButton);
+            hideButton(resumeButton);
         } else if (mode === 'resume') {
-            resumeButton.classList.remove('d-none');
-            startButton.classList.add('d-none');
+            showButton(resumeButton);
+            hideButton(startButton);
         } else {
-            startButton.classList.add('d-none');
-            resumeButton.classList.add('d-none');
+            hideButton(startButton);
+            hideButton(resumeButton);
         }
+    };
+    const setPowerControlsForStatus = (status, sessionActive) => {
+        if (!sessionActive) {
+            showPowerMenu(false, true);
+            return;
+        }
+        if (status === 'running') {
+            showVmActions(null);
+            showPowerMenu(true, true);
+        } else if (status === 'paused' || status === 'suspended') {
+            showPowerMenu(false, true);
+            showVmActions('resume');
+        } else if (status) {
+            showPowerMenu(false, true);
+            showVmActions('start');
+        }
+    };
+    const animatePowerButton = (button) => {
+        if (!button) {
+            return;
+        }
+        button.classList.add('slide-out');
+        setTimeout(() => {
+            button.classList.add('d-none');
+            button.classList.remove('slide-out');
+        }, 220);
     };
     const clearReconnectTimer = () => {
         if (reconnectTimer) {
@@ -401,7 +488,6 @@ function initVmConsole() {
     const setReconnectBlocked = (blocked, reason, status) => {
         reconnectBlocked = blocked;
         if (!blocked) {
-            showVmActions(null);
             return;
         }
         if (reason === 'session') {
@@ -416,6 +502,10 @@ function initVmConsole() {
             } else {
                 showVmActions(null);
             }
+            showPowerMenu(false, true);
+            if (typeof window.proxstarRefreshSessionTimer === 'function') {
+                window.proxstarRefreshSessionTimer();
+            }
         } else if (reason === 'vm') {
             const msg = status === 'paused' || status === 'suspended'
                 ? 'VM is paused.'
@@ -425,12 +515,14 @@ function initVmConsole() {
             setOverlayStatic(msg, false);
             showStatusWarning(false);
             showVmActions(status === 'paused' || status === 'suspended' ? 'resume' : 'start');
+            showPowerMenu(false, true);
         } else {
             updateStatus('Reconnect disabled.');
             setConsoleState('disconnected', 'Reconnect disabled.');
             setOverlayStatic('Reconnect disabled.', false);
             showStatusWarning(false);
             showVmActions(null);
+            showPowerMenu(false, true);
         }
     };
     const checkReconnectAllowed = async () => {
@@ -460,6 +552,9 @@ function initVmConsole() {
                 overrideReconnectUsed = false;
             }
             lastVmStatus = status;
+        }
+        if (sessionInfo) {
+            setPowerControlsForStatus(status, sessionInfo.running);
         }
         if (!sessionInfo || !sessionInfo.running || sessionInfo.remaining_seconds === 0) {
             if (status === 'running' && !overrideReconnectUsed) {
@@ -492,6 +587,7 @@ function initVmConsole() {
         rfb.addEventListener('connect', () => {
             updateStatus('Connected.');
             setConsoleState('loading', 'Loading display…');
+            setOverlayLoading('Loading display…');
             showStatusWarning(false);
             clearReconnectTimer();
             firstFrameSeen = false;
@@ -508,14 +604,22 @@ function initVmConsole() {
             }
             updateStatus('Disconnected. Reconnecting...');
             setConsoleState('disconnected', 'Disconnected. Reconnecting…');
+            setOverlayLoading('Disconnected. Reconnecting…');
             showStatusWarning(false);
             scheduleReconnect();
+            if (typeof window.proxstarRefreshSessionTimer === 'function') {
+                window.proxstarRefreshSessionTimer();
+            }
         });
         rfb.addEventListener('securityfailure', () => {
             updateStatus('Console auth failed. Reconnecting...');
             setConsoleState('disconnected', 'Auth failed. Reconnecting…');
+            setOverlayLoading('Auth failed. Reconnecting…');
             showStatusWarning(false);
             scheduleReconnect();
+            if (typeof window.proxstarRefreshSessionTimer === 'function') {
+                window.proxstarRefreshSessionTimer();
+            }
         });
         rfb.addEventListener('framebufferupdate', () => {
             markFirstFrame();
@@ -543,6 +647,7 @@ function initVmConsole() {
         setReconnectBlocked(false, null);
         updateStatus('Connecting to console...');
         setConsoleState('loading', 'Connecting…');
+        setOverlayLoading('Connecting…');
         showStatusWarning(false);
         try {
             const response = await fetch(`/console/vm/${vmid}`, {
@@ -575,11 +680,12 @@ function initVmConsole() {
             applyRfbSettings(getLowBandwidthSetting());
             updateStatus('Connected.');
             setConsoleState('loading', 'Loading display…');
+            setOverlayLoading('Loading display…');
             showStatusWarning(false);
         } catch (err) {
             updateStatus('Unable to start console. Please try again later.');
             setConsoleState('disconnected', 'Unable to connect. Retrying…');
-            setOverlayStatic('Unable to connect. Retrying…', false);
+            setOverlayLoading('Unable to connect. Retrying…');
             showStatusWarning(false);
             scheduleReconnect();
         } finally {
@@ -650,6 +756,11 @@ function initVmConsole() {
                 }
                 updateStatus('Starting VM...');
                 setConsoleState('loading', 'Starting VM…');
+                setOverlayLoading('Starting VM…');
+                if (typeof window.proxstarRefreshSessionTimer === 'function') {
+                    window.proxstarRefreshSessionTimer();
+                }
+                animatePowerButton(startButton);
                 clearReconnectTimer();
                 connectConsole();
             }).catch(() => {
@@ -669,11 +780,74 @@ function initVmConsole() {
                 }
                 updateStatus('Resuming VM...');
                 setConsoleState('loading', 'Resuming VM…');
+                setOverlayLoading('Resuming VM…');
+                if (typeof window.proxstarRefreshSessionTimer === 'function') {
+                    window.proxstarRefreshSessionTimer();
+                }
+                animatePowerButton(resumeButton);
                 clearReconnectTimer();
                 connectConsole();
             }).catch(() => {
                 updateStatus('Unable to resume VM.');
                 setOverlayStatic('Unable to resume VM.');
+            });
+        });
+    }
+    if (powerMenu) {
+        powerMenu.querySelectorAll('[data-console-action]').forEach((item) => {
+            item.addEventListener('click', () => {
+                const action = item.getAttribute('data-console-action');
+                if (!action) {
+                    return;
+                }
+                const label = item.textContent ? item.textContent.trim() : action;
+                swal({
+                    title: `Confirm ${label}?`,
+                    icon: 'warning',
+                    buttons: {
+                        cancel: true,
+                        action: {
+                            text: label,
+                            closeModal: false,
+                            className: 'swal-button--danger',
+                        },
+                    },
+                    dangerMode: true,
+                }).then((confirmAction) => {
+                    if (!confirmAction) {
+                        return;
+                    }
+                    updateStatus(`${label}...`);
+                    setConsoleState('loading', `${label}…`);
+                    setOverlayLoading(`${label}…`);
+                    fetch(`/vm/${vmid}/power/${action}`, {
+                        credentials: 'same-origin',
+                        method: 'post',
+                    }).then((response) => {
+                        if (!response.ok) {
+                            throw new Error('power_failed');
+                        }
+                        if (typeof window.proxstarRefreshSessionTimer === 'function') {
+                            window.proxstarRefreshSessionTimer();
+                        }
+                        if (action === 'reset') {
+                            clearReconnectTimer();
+                            connectConsole();
+                        } else {
+                            lastStateCheck = 0;
+                            setTimeout(() => {
+                                checkReconnectAllowed().then((guard) => {
+                                    if (!guard.allowed) {
+                                        setReconnectBlocked(true, guard.reason, guard.status);
+                                    }
+                                });
+                            }, 1500);
+                        }
+                        swal.close();
+                    }).catch(() => {
+                        swal("Uh oh...", `Unable to ${label.toLowerCase()}. Please try again later.`, "error");
+                    });
+                });
             });
         });
     }

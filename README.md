@@ -3,6 +3,8 @@ Proxstar
 
 ## WIP. fork of a project by CSH of rit.edu.
 
+todo: rename to Proxmoon
+
 - Proxmox SDNs instead of STARRS. VMnet firewall security groups applied per-pool (per-user)
 - Session limits for users. VMs are shut down after timer ends.
 - LDAP removed. Roles based on OIDC claims.
