@@ -210,3 +210,143 @@ table, th, td {
     margin: 0;
     font-weight: 500;
 }
+
+.console-toolbar .custom-control {
+    margin-bottom: 0;
+}
+
+.console-status-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+#console-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.console-status-icon {
+    color: #ffc107;
+}
+
+#console-vm-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.console-screen {
+    width: 100%;
+    height: 80vh;
+    background: #1f1f1f;
+    position: relative;
+    overflow: hidden;
+}
+
+.console-settings-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    align-items: center;
+}
+
+#session-timer.session-warning {
+    animation: session-pulse-strong 1.6s ease-in-out infinite;
+}
+
+#session-timer.session-warning .card-body {
+    background: #ffecb5;
+    color: #7a4a00;
+    border: 1px solid #f0c36d;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+#session-timer.session-expired {
+    animation: session-pulse-strong 1.1s ease-in-out infinite;
+}
+
+#session-timer.session-expired .card-body {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f1aeb5;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+#session-timer.session-warning,
+#session-timer.session-expired {
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.5rem;
+}
+
+@keyframes session-pulse {
+    0% {
+        box-shadow: 0 0 0 rgba(220, 53, 69, 0.0);
+    }
+    70% {
+        box-shadow: 0 0 0.75rem rgba(220, 53, 69, 0.35);
+    }
+    100% {
+        box-shadow: 0 0 0 rgba(220, 53, 69, 0.0);
+    }
+}
+
+@keyframes session-pulse-strong {
+    0% {
+        box-shadow: 0 0 0 rgba(220, 53, 69, 0.0);
+        transform: scale(1);
+    }
+    55% {
+        box-shadow: 0 0 1.1rem rgba(220, 53, 69, 0.45);
+        transform: scale(1.01);
+    }
+    100% {
+        box-shadow: 0 0 0 rgba(220, 53, 69, 0.0);
+        transform: scale(1);
+    }
+}
+
+.console-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.55);
+    color: #f8f9fa;
+    z-index: 2;
+}
+
+.console-overlay-text {
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.console-overlay.console-overlay-static {
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.console-overlay-icon {
+    color: #ffc107;
+}
+
+.console-screen.console-connected .console-overlay {
+    display: none;
+}
+
+.console-screen.console-disconnected .console-overlay {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.console-screen.console-disconnected canvas,
+.console-screen.console-disconnected .rfb_canvas,
+.console-screen.console-disconnected .noVNC_canvas,
+.console-screen.console-disconnected > * {
+    filter: grayscale(1) contrast(0.85) !important;
+}

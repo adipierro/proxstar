@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}VM {{ vmid }} Console | Proxstar{% endblock %}
 {% block body %}
 
 <div class="container-fluid px-4" id="vm-console" data-vmid="{{ vmid }}">
@@ -10,25 +11,57 @@
                     <span id="session-timer-remaining">--:--:--</span>
                     <span id="session-timer-meta"></span>
                 </div>
-                <div id="console-status">Connecting to console...</div>
+                <div class="console-status-wrap">
+                    <div id="console-status">
+                        <i class="fas fa-exclamation-triangle console-status-icon d-none" id="console-status-icon" aria-hidden="true"></i>
+                        <span id="console-status-text">Connecting to console...</span>
+                    </div>
+                </div>
                 <div class="btn-group" role="group" aria-label="Console controls">
+                    <button class="btn btn-success btn-sm d-none" id="console-start-vm" type="button">Start VM</button>
+                    <button class="btn btn-success btn-sm d-none" id="console-resume-vm" type="button">Resume VM</button>
                     <button class="btn btn-primary btn-sm" id="console-reconnect" type="button">
                         Reconnect
                     </button>
                     <button class="btn btn-secondary btn-sm" id="console-fullscreen" type="button">
                         Fullscreen
                     </button>
+                    <button class="btn btn-outline-secondary btn-sm" type="button" data-toggle="collapse" data-target="#console-settings" aria-expanded="false" aria-controls="console-settings">
+                        Settings
+                    </button>
+                </div>
+            </div>
+            <div class="collapse console-settings" id="console-settings">
+                <div class="card bg-light mb-3">
+                    <div class="card-body py-2">
+                        <div class="console-settings-grid">
+                            <div class="custom-control custom-switch">
+                                <input type="checkbox" class="custom-control-input" id="console-low-bandwidth">
+                                <label class="custom-control-label" for="console-low-bandwidth">Low bandwidth</label>
+                            </div>
+                            <div class="custom-control custom-switch">
+                                <input type="checkbox" class="custom-control-input" id="console-scale">
+                                <label class="custom-control-label" for="console-scale">Scale to fit</label>
+                            </div>
+                            <div class="custom-control custom-switch">
+                                <input type="checkbox" class="custom-control-input" id="console-dot-cursor">
+                                <label class="custom-control-label" for="console-dot-cursor">Dot cursor</label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="card bg-light mb-3">
                 <div class="card-body p-0">
-                    <iframe
-                        id="console-frame"
-                        title="VM Console"
-                        style="width: 100%; height: 80vh; border: 0;"
-                        allow="fullscreen; clipboard-read; clipboard-write"
-                        allowfullscreen
-                    ></iframe>
+                    <div id="console-screen" class="console-screen console-loading">
+                        <div class="console-overlay" id="console-overlay">
+                            <div class="spinner-border text-light" role="status" aria-hidden="true"></div>
+                            <div class="console-overlay-text">
+                                <i class="fas fa-exclamation-triangle console-overlay-icon d-none" id="console-overlay-icon" aria-hidden="true"></i>
+                                <span id="console-overlay-text">Connecting…</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

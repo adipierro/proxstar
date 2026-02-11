@@ -186,7 +186,7 @@ if not testing:
 
     if app.config.get('ENABLE_VM_EXPIRATION') and 'process_expiring_vms' not in scheduler:
         logging.info('adding process expiring VMs task to scheduler')
-        scheduler.cron('0 5 * * *', id='process_expiring_vms', func=process_expiring_vms_task)
+        scheduler.cron('0 2 * * *', id='process_expiring_vms', func=process_expiring_vms_task)
 
     if 'cleanup_vnc' not in scheduler:
         logging.info('adding cleanup VNC task to scheduler')
@@ -275,6 +275,30 @@ def _expire_all_sessions():
         redis_conn.delete(f'{SESSION_SHUTDOWN_PREFIX}{user}')
         expired += 1
     return expired
+
+
+def _shorten_all_sessions(minutes=3):
+    target_remaining = minutes * 60
+    shortened = 0
+    for raw_key in redis_conn.scan_iter(f'{SESSION_KEY_PREFIX}*'):
+        key = raw_key.decode('utf-8') if isinstance(raw_key, bytes) else str(raw_key)
+        user = key[len(SESSION_KEY_PREFIX) :]
+        try:
+            raw_value = redis_conn.get(key)
+            if raw_value is None:
+                continue
+            session_start = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        timeout_seconds = int(app.config['SESSION_TIMEOUT_HOURS'] * 3600)
+        current_remaining = max(0, int(timeout_seconds - (time.time() - session_start)))
+        if current_remaining <= target_remaining:
+            continue
+        new_start = time.time() - (timeout_seconds - target_remaining)
+        redis_conn.set(key, str(new_start))
+        redis_conn.delete(f'{SESSION_SHUTDOWN_PREFIX}{user}')
+        shortened += 1
+    return shortened
 
 
 def _get_vm_or_404(vmid):
@@ -608,6 +632,28 @@ def vm_summary(vmid):
                 'usage_check': usage_check,
             }
         )
+    return abort(403)
+
+
+@app.route('/api/vm/<string:vmid>/state')
+@auth.oidc_auth('default')
+def vm_state(vmid):
+    user = User(flask_session['userinfo']['preferred_username'])
+    connect_proxmox()
+    if user.rtp or int(vmid) in user.allowed_vms:
+        vm = _get_vm_or_404(vmid)
+        return jsonify({'qmpstatus': vm.qmpstatus})
+    return abort(403)
+
+
+@app.route('/api/vm/<string:vmid>/label')
+@auth.oidc_auth('default')
+def vm_label(vmid):
+    user = User(flask_session['userinfo']['preferred_username'])
+    connect_proxmox()
+    if user.rtp or int(vmid) in user.allowed_vms:
+        vm = _get_vm_or_404(vmid)
+        return jsonify({'name': vm.name})
     return abort(403)
 
 
@@ -1030,6 +1076,20 @@ def expire_sessions():
     except Exception as e:  # pylint: disable=broad-except
         logging.warning('Failed to enqueue session enforcement: %s', e)
     return jsonify({'expired': expired})
+
+
+@app.route('/admin/sessions/warn', methods=['POST'])
+@auth.oidc_auth('default')
+def warn_sessions():
+    user = User(flask_session['userinfo']['preferred_username'])
+    if not user.rtp:
+        return '', 403
+    shortened = _shorten_all_sessions(3)
+    try:
+        q.enqueue(enforce_session_timeouts_task, job_timeout=120)
+    except Exception as e:  # pylint: disable=broad-except
+        logging.warning('Failed to enqueue session enforcement: %s', e)
+    return jsonify({'shortened': shortened, 'minutes': 3})
 
 
 @app.route('/settings')

@@ -21,6 +21,14 @@ function initSessionTimer() {
     const remainingEl = $("#session-timer-remaining");
     const meta = $("#session-timer-meta");
     let endTs = null;
+    const setAttention = (state) => {
+        container.removeClass('session-warning session-expired');
+        if (state === 'warning') {
+            container.addClass('session-warning');
+        } else if (state === 'expired') {
+            container.addClass('session-expired');
+        }
+    };
     const tick = () => {
         if (!endTs) {
             return;
@@ -32,6 +40,11 @@ function initSessionTimer() {
         remainingEl.text(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`);
         if (remaining <= 0) {
             meta.text('(session expired)');
+            setAttention('expired');
+        } else if (remaining <= 300) {
+            setAttention('warning');
+        } else {
+            setAttention(null);
         }
     };
     const fetchSession = () => {
@@ -49,6 +62,7 @@ function initSessionTimer() {
                 container.show();
                 meta.text('(no active session)');
                 remainingEl.text('--:--:--');
+                setAttention(null);
                 return;
             }
             container.show();
@@ -187,58 +201,504 @@ function initVmConsole() {
     if (!vmid) {
         return;
     }
-    const statusEl = document.getElementById('console-status');
-    const frame = document.getElementById('console-frame');
-    const connectConsole = () => {
-        if (statusEl) {
-            statusEl.textContent = 'Connecting to console...';
+    const statusEl = document.getElementById('console-status-text');
+    const statusIcon = document.getElementById('console-status-icon');
+    const screen = document.getElementById('console-screen');
+    const overlayText = document.getElementById('console-overlay-text');
+    const overlay = document.getElementById('console-overlay');
+    const overlayIcon = document.getElementById('console-overlay-icon');
+    const startButton = document.getElementById('console-start-vm');
+    const resumeButton = document.getElementById('console-resume-vm');
+    const lowBandwidthToggle = document.getElementById('console-low-bandwidth');
+    const scaleToggle = document.getElementById('console-scale');
+    const dotCursorToggle = document.getElementById('console-dot-cursor');
+    const LOW_BW_KEY = 'proxstar.lowBandwidth';
+    const SCALE_KEY = 'proxstar.consoleScale';
+    const DOT_KEY = 'proxstar.consoleDotCursor';
+    const reconnectCooldownMs = 5000;
+    let reconnectTimer = null;
+    let reconnectInFlight = false;
+    let reconnectBlocked = false;
+    let suppressDisconnect = false;
+    let firstFrameSeen = false;
+    let firstFrameTimer = null;
+    let lastStateCheck = 0;
+    let lastStateResult = null;
+    let lastVmStatus = null;
+    let overrideReconnectUsed = false;
+    let rfb = null;
+    let currentParams = null;
+    let rfbPromise = null;
+    const getLowBandwidthSetting = () => {
+        try {
+            return window.localStorage.getItem(LOW_BW_KEY) === 'true';
+        } catch (err) {
+            return false;
         }
-        fetch(`/console/vm/${vmid}`, {
-            credentials: 'same-origin',
-            method: 'post',
-        })
+    };
+    const setLowBandwidthSetting = (value) => {
+        try {
+            window.localStorage.setItem(LOW_BW_KEY, value ? 'true' : 'false');
+        } catch (err) {
+            // ignore storage failures
+        }
+    };
+    const getScaleSetting = () => {
+        try {
+            const value = window.localStorage.getItem(SCALE_KEY);
+            if (value === null) {
+                return true;
+            }
+            return value === 'true';
+        } catch (err) {
+            return true;
+        }
+    };
+    const setScaleSetting = (value) => {
+        try {
+            window.localStorage.setItem(SCALE_KEY, value ? 'true' : 'false');
+        } catch (err) {
+            // ignore storage failures
+        }
+    };
+    const getDotCursorSetting = () => {
+        try {
+            const value = window.localStorage.getItem(DOT_KEY);
+            if (value === null) {
+                return true;
+            }
+            return value === 'true';
+        } catch (err) {
+            return true;
+        }
+    };
+    const setDotCursorSetting = (value) => {
+        try {
+            window.localStorage.setItem(DOT_KEY, value ? 'true' : 'false');
+        } catch (err) {
+            // ignore storage failures
+        }
+    };
+    const loadRfb = () => {
+        if (!rfbPromise) {
+            rfbPromise = import('/static/noVNC/core/rfb.js').then((module) => {
+                return module.default || module.RFB || module;
+            });
+        }
+        return rfbPromise;
+    };
+    const updateStatus = (message) => {
+        if (statusEl) {
+            statusEl.textContent = message;
+        }
+    };
+    const updateConsoleTitle = (name) => {
+        const label = name ? `VM ${name}` : `VM ${vmid}`;
+        document.title = `${label} Console | Proxstar`;
+    };
+    const showStatusWarning = (show) => {
+        if (!statusIcon) {
+            return;
+        }
+        statusIcon.classList.toggle('d-none', !show);
+        statusIcon.style.display = show ? 'inline-flex' : 'none';
+    };
+    const setConsoleState = (state, message) => {
+        if (!screen) {
+            return;
+        }
+        screen.classList.remove('console-connected', 'console-disconnected', 'console-loading');
+        if (state === 'connected') {
+            screen.classList.add('console-connected');
+        } else if (state === 'disconnected') {
+            screen.classList.add('console-disconnected');
+        } else {
+            screen.classList.add('console-loading');
+        }
+        if (overlayText && message) {
+            overlayText.textContent = message;
+        }
+        if (overlay) {
+            if (state === 'connected') {
+                overlay.classList.remove('console-overlay-static');
+                overlay.querySelector('.spinner-border')?.classList.remove('d-none');
+            }
+        }
+    };
+    const setOverlayStatic = (message, showIcon = false) => {
+        if (!overlay) {
+            return;
+        }
+        overlay.classList.add('console-overlay-static');
+        const spinner = overlay.querySelector('.spinner-border');
+        if (spinner) {
+            spinner.classList.add('d-none');
+        }
+        if (overlayText && message) {
+            overlayText.textContent = message;
+        }
+        if (overlayIcon) {
+            overlayIcon.classList.toggle('d-none', !showIcon);
+        }
+    };
+    const showVmActions = (mode) => {
+        if (!startButton || !resumeButton) {
+            return;
+        }
+        if (mode === 'start') {
+            startButton.classList.remove('d-none');
+            resumeButton.classList.add('d-none');
+        } else if (mode === 'resume') {
+            resumeButton.classList.remove('d-none');
+            startButton.classList.add('d-none');
+        } else {
+            startButton.classList.add('d-none');
+            resumeButton.classList.add('d-none');
+        }
+    };
+    const clearReconnectTimer = () => {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+    };
+    const markFirstFrame = () => {
+        if (firstFrameSeen) {
+            return;
+        }
+        firstFrameSeen = true;
+        if (firstFrameTimer) {
+            clearTimeout(firstFrameTimer);
+            firstFrameTimer = null;
+        }
+        setConsoleState('connected', 'Connected.');
+    };
+    const buildWsUrl = (params) => {
+        const scheme =
+            window.location.protocol === 'https:' || String(params.port) === '443' ? 'wss' : 'ws';
+        const path = `path?token=${encodeURIComponent(params.token)}`;
+        return `${scheme}://${params.host}:${params.port}/${path}`;
+    };
+    const applyRfbSettings = (lowBandwidthEnabled) => {
+        if (!rfb) {
+            return;
+        }
+        const scaleEnabled = getScaleSetting();
+        const dotCursorEnabled = getDotCursorSetting();
+        rfb.scaleViewport = scaleEnabled;
+        rfb.resizeSession = lowBandwidthEnabled;
+        rfb.showDotCursor = dotCursorEnabled;
+        if (typeof rfb.qualityLevel === 'number') {
+            rfb.qualityLevel = lowBandwidthEnabled ? 4 : 6;
+        }
+        if (typeof rfb.compressionLevel === 'number') {
+            rfb.compressionLevel = lowBandwidthEnabled ? 9 : 6;
+        }
+        if (lowBandwidthEnabled && screen && typeof rfb.requestDesktopSize === 'function') {
+            rfb.requestDesktopSize(screen.clientWidth, screen.clientHeight);
+        }
+    };
+    const setReconnectBlocked = (blocked, reason, status) => {
+        reconnectBlocked = blocked;
+        if (!blocked) {
+            showVmActions(null);
+            return;
+        }
+        if (reason === 'session') {
+            updateStatus('Session ended.');
+            setConsoleState('disconnected', 'Session ended.');
+            setOverlayStatic('Session ended.', true);
+            showStatusWarning(true);
+            if (status === 'paused' || status === 'suspended') {
+                showVmActions('resume');
+            } else if (status === 'stopped') {
+                showVmActions('start');
+            } else {
+                showVmActions(null);
+            }
+        } else if (reason === 'vm') {
+            const msg = status === 'paused' || status === 'suspended'
+                ? 'VM is paused.'
+                : 'VM is not running.';
+            updateStatus(msg);
+            setConsoleState('disconnected', msg);
+            setOverlayStatic(msg, false);
+            showStatusWarning(false);
+            showVmActions(status === 'paused' || status === 'suspended' ? 'resume' : 'start');
+        } else {
+            updateStatus('Reconnect disabled.');
+            setConsoleState('disconnected', 'Reconnect disabled.');
+            setOverlayStatic('Reconnect disabled.', false);
+            showStatusWarning(false);
+            showVmActions(null);
+        }
+    };
+    const checkReconnectAllowed = async () => {
+        const now = Date.now();
+        if (lastStateResult && (now - lastStateCheck) < 5000) {
+            return lastStateResult;
+        }
+        let sessionInfo = null;
+        let status = null;
+        try {
+            const [sessionResp, stateResp] = await Promise.all([
+                fetch('/session', { credentials: 'same-origin' }),
+                fetch(`/api/vm/${vmid}/state`, { credentials: 'same-origin' }),
+            ]);
+            if (sessionResp.ok) {
+                sessionInfo = await sessionResp.json();
+            }
+            if (stateResp.ok) {
+                const summary = await stateResp.json();
+                status = summary && summary.qmpstatus;
+            }
+        } catch (err) {
+            // If we can't determine, allow a retry and surface errors later.
+        }
+        if (status && status !== lastVmStatus) {
+            if (status === 'running') {
+                overrideReconnectUsed = false;
+            }
+            lastVmStatus = status;
+        }
+        if (!sessionInfo || !sessionInfo.running || sessionInfo.remaining_seconds === 0) {
+            if (status === 'running' && !overrideReconnectUsed) {
+                overrideReconnectUsed = true;
+                lastStateResult = { allowed: true, reason: 'session', status: status, override: true };
+            } else {
+                lastStateResult = { allowed: false, reason: 'session', status: status };
+            }
+        } else if (!['running', 'paused', 'suspended'].includes(status)) {
+            lastStateResult = { allowed: false, reason: 'vm', status: status || 'stopped' };
+        } else {
+            lastStateResult = { allowed: true, reason: null, status: status, override: false };
+        }
+        lastStateCheck = now;
+        return lastStateResult;
+    };
+    const scheduleReconnect = () => {
+        if (reconnectTimer || reconnectInFlight || reconnectBlocked) {
+            return;
+        }
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connectConsole();
+        }, reconnectCooldownMs);
+    };
+    const attachRfbHandlers = () => {
+        if (!rfb) {
+            return;
+        }
+        rfb.addEventListener('connect', () => {
+            updateStatus('Connected.');
+            setConsoleState('loading', 'Loading display…');
+            showStatusWarning(false);
+            clearReconnectTimer();
+            firstFrameSeen = false;
+            if (firstFrameTimer) {
+                clearTimeout(firstFrameTimer);
+            }
+            firstFrameTimer = setTimeout(() => {
+                markFirstFrame();
+            }, 1500);
+        });
+        rfb.addEventListener('disconnect', () => {
+            if (suppressDisconnect) {
+                return;
+            }
+            updateStatus('Disconnected. Reconnecting...');
+            setConsoleState('disconnected', 'Disconnected. Reconnecting…');
+            showStatusWarning(false);
+            scheduleReconnect();
+        });
+        rfb.addEventListener('securityfailure', () => {
+            updateStatus('Console auth failed. Reconnecting...');
+            setConsoleState('disconnected', 'Auth failed. Reconnecting…');
+            showStatusWarning(false);
+            scheduleReconnect();
+        });
+        rfb.addEventListener('framebufferupdate', () => {
+            markFirstFrame();
+        });
+        rfb.addEventListener('credentialsrequired', () => {
+            if (currentParams) {
+                rfb.sendCredentials({ password: currentParams.password });
+            }
+        });
+    };
+    const connectConsole = async () => {
+        if (reconnectInFlight) {
+            return;
+        }
+        reconnectInFlight = true;
+        const guard = await checkReconnectAllowed();
+        if (!guard.allowed) {
+            setReconnectBlocked(true, guard.reason, guard.status);
+            reconnectInFlight = false;
+            return;
+        }
+        if (guard.override) {
+            updateStatus('Session ended. Attempting reconnect...');
+        }
+        setReconnectBlocked(false, null);
+        updateStatus('Connecting to console...');
+        setConsoleState('loading', 'Connecting…');
+        showStatusWarning(false);
+        try {
+            const response = await fetch(`/console/vm/${vmid}`, {
+                credentials: 'same-origin',
+                method: 'post',
+            });
+            if (!response.ok) {
+                throw new Error('console-fetch-failed');
+            }
+            const vncParams = await response.json();
+            currentParams = vncParams;
+            const RFB = await loadRfb();
+            if (!screen) {
+                throw new Error('console-target-missing');
+            }
+            if (rfb) {
+                suppressDisconnect = true;
+                try {
+                    rfb.disconnect();
+                } catch (err) {
+                    // ignore disconnect errors
+                }
+                setTimeout(() => {
+                    suppressDisconnect = false;
+                }, 0);
+            }
+            const url = buildWsUrl(vncParams);
+            rfb = new RFB(screen, url, { credentials: { password: vncParams.password } });
+            attachRfbHandlers();
+            applyRfbSettings(getLowBandwidthSetting());
+            updateStatus('Connected.');
+            setConsoleState('loading', 'Loading display…');
+            showStatusWarning(false);
+        } catch (err) {
+            updateStatus('Unable to start console. Please try again later.');
+            setConsoleState('disconnected', 'Unable to connect. Retrying…');
+            setOverlayStatic('Unable to connect. Retrying…', false);
+            showStatusWarning(false);
+            scheduleReconnect();
+        } finally {
+            reconnectInFlight = false;
+        }
+    };
+    const fetchVmLabel = () => {
+        fetch(`/api/vm/${vmid}/label`, { credentials: 'same-origin' })
             .then((response) => {
                 if (!response.ok) {
-                    throw new Error('console-fetch-failed');
+                    throw new Error('label-fetch-failed');
                 }
                 return response.json();
             })
-            .then((vnc_params) => {
-                const src = `/static/noVNC/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=2000&show_control_bar=1&showControlBar=1&resize=remote&scaling=scale&password=${encodeURIComponent(vnc_params.password)}&host=${encodeURIComponent(vnc_params.host)}&port=${encodeURIComponent(vnc_params.port)}&path=path?token=${encodeURIComponent(vnc_params.token)}`;
-                if (frame) {
-                    frame.src = src;
-                }
-                if (statusEl) {
-                    statusEl.textContent = 'Connected.';
+            .then((data) => {
+                if (data && data.name) {
+                    updateConsoleTitle(data.name);
                 }
             })
             .catch(() => {
-                if (statusEl) {
-                    statusEl.textContent = 'Unable to start console. Please try again later.';
-                }
+                // Ignore label fetch failures.
             });
     };
     connectConsole();
-    const reconnect = document.getElementById('console-reconnect');
-    if (reconnect) {
-        reconnect.addEventListener('click', () => {
-            connectConsole();
-        });
-    }
-    const fullscreen = document.getElementById('console-fullscreen');
-    if (fullscreen && frame) {
-        fullscreen.addEventListener('click', () => {
-            if (frame.requestFullscreen) {
-                frame.requestFullscreen();
-            } else if (frame.webkitRequestFullscreen) {
-                frame.webkitRequestFullscreen();
-            } else if (frame.mozRequestFullScreen) {
-                frame.mozRequestFullScreen();
-            } else if (frame.msRequestFullscreen) {
-                frame.msRequestFullscreen();
+    fetchVmLabel();
+    if (lowBandwidthToggle) {
+        lowBandwidthToggle.checked = getLowBandwidthSetting();
+        lowBandwidthToggle.addEventListener('change', () => {
+            const enabled = lowBandwidthToggle.checked;
+            setLowBandwidthSetting(enabled);
+            applyRfbSettings(enabled);
+            if (statusEl) {
+                statusEl.textContent = enabled ? 'Low bandwidth enabled.' : 'Low bandwidth disabled.';
             }
         });
     }
+    if (scaleToggle) {
+        scaleToggle.checked = getScaleSetting();
+        scaleToggle.addEventListener('change', () => {
+            const enabled = scaleToggle.checked;
+            setScaleSetting(enabled);
+            applyRfbSettings(getLowBandwidthSetting());
+        });
+    }
+    if (dotCursorToggle) {
+        dotCursorToggle.checked = getDotCursorSetting();
+        dotCursorToggle.addEventListener('change', () => {
+            const enabled = dotCursorToggle.checked;
+            setDotCursorSetting(enabled);
+            applyRfbSettings(getLowBandwidthSetting());
+        });
+    }
+    const reconnect = document.getElementById('console-reconnect');
+    if (reconnect) {
+        reconnect.addEventListener('click', () => {
+            clearReconnectTimer();
+            connectConsole();
+        });
+    }
+    if (startButton) {
+        startButton.addEventListener('click', () => {
+            fetch(`/vm/${vmid}/power/start`, {
+                credentials: 'same-origin',
+                method: 'post',
+            }).then((response) => {
+                if (!response.ok) {
+                    throw new Error('start_failed');
+                }
+                updateStatus('Starting VM...');
+                setConsoleState('loading', 'Starting VM…');
+                clearReconnectTimer();
+                connectConsole();
+            }).catch(() => {
+                updateStatus('Unable to start VM.');
+                setOverlayStatic('Unable to start VM.');
+            });
+        });
+    }
+    if (resumeButton) {
+        resumeButton.addEventListener('click', () => {
+            fetch(`/vm/${vmid}/power/resume`, {
+                credentials: 'same-origin',
+                method: 'post',
+            }).then((response) => {
+                if (!response.ok) {
+                    throw new Error('resume_failed');
+                }
+                updateStatus('Resuming VM...');
+                setConsoleState('loading', 'Resuming VM…');
+                clearReconnectTimer();
+                connectConsole();
+            }).catch(() => {
+                updateStatus('Unable to resume VM.');
+                setOverlayStatic('Unable to resume VM.');
+            });
+        });
+    }
+    const fullscreen = document.getElementById('console-fullscreen');
+    if (fullscreen && screen) {
+        fullscreen.addEventListener('click', () => {
+            if (screen.requestFullscreen) {
+                screen.requestFullscreen();
+            } else if (screen.webkitRequestFullscreen) {
+                screen.webkitRequestFullscreen();
+            } else if (screen.mozRequestFullScreen) {
+                screen.mozRequestFullScreen();
+            } else if (screen.msRequestFullscreen) {
+                screen.msRequestFullscreen();
+            }
+            setTimeout(() => {
+                applyRfbSettings(getLowBandwidthSetting());
+            }, 100);
+        });
+    }
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement === screen) {
+            applyRfbSettings(getLowBandwidthSetting());
+        }
+    });
 }
 
 function initPoolSessionTimers() {
@@ -557,6 +1017,11 @@ function initVmHardware() {
         }
         if (nameEl) {
             nameEl.textContent = summary.name || `VM ${vmid}`;
+        }
+        if (summary.name) {
+            document.title = `VM ${summary.name} Details | Proxstar`;
+        } else {
+            document.title = `VM ${vmid} Details | Proxstar`;
         }
         if (nodeEl) {
             nodeEl.textContent = summary.node || 'Unknown';
@@ -1625,6 +2090,40 @@ $("#expire-all-sessions").click(function(){
                 autoCloseAlert(`Expired ${count} sessions.`);
             }).catch(() => {
                 swal("Uh oh...", "Unable to expire sessions. Please try again later.", "error");
+            });
+        }
+    });
+});
+
+$("#warn-all-sessions").click(function(){
+    swal({
+        title: "Reduce all sessions to 3 minutes?",
+        text: "This will shorten active sessions to 3 minutes remaining. It does not stop VMs immediately.",
+        icon: "warning",
+        buttons: {
+            cancel: true,
+            action: {
+                text: "Reduce",
+                closeModal: false,
+                className: "swal-button--danger",
+            }
+        },
+        dangerMode: true,
+    }).then((willWarn) => {
+        if (willWarn) {
+            fetch('/admin/sessions/warn', {
+                credentials: 'same-origin',
+                method: 'post',
+            }).then((response) => {
+                if (!response.ok) {
+                    throw new Error('warn_failed');
+                }
+                return response.json();
+            }).then((data) => {
+                const count = data && typeof data.shortened === 'number' ? data.shortened : 0;
+                autoCloseAlert(`Reduced ${count} sessions to 3 minutes.`);
+            }).catch(() => {
+                swal("Uh oh...", "Unable to reduce sessions. Please try again later.", "error");
             });
         }
     });

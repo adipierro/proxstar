@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Settings | Proxstar{% endblock %}
 {% block body %}
 
 <div class="container">
@@ -124,9 +125,14 @@
                     <p class="text-muted">
                         Force all sessions to expire. Running VMs will be shut down on the next session check.
                     </p>
-                    <button class="btn btn-sm btn-danger" id="expire-all-sessions" type="button">
-                        Expire All Sessions
-                    </button>
+                    <div class="btn-group" role="group" aria-label="Session controls">
+                        <button class="btn btn-sm btn-warning" id="warn-all-sessions" type="button">
+                            Reduce All Sessions to 3 Minutes
+                        </button>
+                        <button class="btn btn-sm btn-danger" id="expire-all-sessions" type="button">
+                            Expire All Sessions
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}VM {{ vm.id }} Details | Proxstar{% endblock %}
 {% block body %}
 
 <div class="container" id="vm-details" data-vmid="{{ vm.id }}" data-usage-disk="0" data-limit-disk="{{ limits['disk'] }}">
@@ -118,7 +119,7 @@
                     <button class="btn btn-success proxstar-actionbtn d-none" id="resume-vm" name="resume" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">RESUME</button>
                     <a class="btn btn-success proxstar-actionbtn d-none" id="console-vm" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}" href="/console/{{ vm.id }}" target="_blank" rel="noopener">CONSOLE</a>
                     <button class="btn btn-info proxstar-actionbtn d-none" id="suspend-vm" name="pause" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">PAUSE</button>
-                    <button class="btn btn-warning proxstar-actionbtn d-none" id="hibernate-vm" name="suspend" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">HIBERNATE</button>
+                    <button class="btn btn-info proxstar-actionbtn d-none" id="hibernate-vm" name="suspend" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">HIBERNATE</button>
                     <button class="btn btn-info proxstar-actionbtn d-none" id="shutdown-vm" name="shutdown" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">SHUTDOWN</button>
                     <button class="btn btn-warning proxstar-actionbtn d-none" id="stop-vm" name="stop" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">STOP</button>
                     <button class="btn btn-warning proxstar-actionbtn d-none" id="reset-vm" name="reset" data-vmid="{{ vm.id }}" data-vmname="{{ vm.id }}">RESET</button>
